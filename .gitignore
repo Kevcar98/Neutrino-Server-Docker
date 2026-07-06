@@ -1,0 +1,18 @@
+# Secrets — never commit real values (templates .env.example / config.properties are fine)
+.env
+
+# Uploaded YouTube cookies / pairing token pushed at runtime (keep the folder + docs)
+cookies/*
+!cookies/.gitkeep
+!cookies/README.md
+
+# User music library (people add their own files)
+local/library/music/
+!local/library/music/.gitkeep
+
+# Docker/runtime data
+resolver-data/
+
+# Python caches
+__pycache__/
+*.pyc

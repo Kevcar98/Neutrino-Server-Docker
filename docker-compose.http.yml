@@ -1,0 +1,78 @@
+# Plain HTTP variant — use with IP only (no domain, no HTTPS).
+# Command: docker compose -f docker-compose.http.yml up -d
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+  backend:
+    image: 1337kavin/piped:latest
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
+    volumes:
+      - ./config.properties.http:/app/config.properties:ro
+
+  proxy:
+    image: 1337kavin/piped-proxy:latest
+    restart: unless-stopped
+    ports:
+      - "8081:8080"
+
+  library:
+    build: ./local/library
+    restart: unless-stopped
+    ports:
+      - "8091:8091"
+    environment:
+      # Server-side playlist imports reach the resolver over the internal Docker
+      # network — a container can't reach its own host's public IP (no NAT hairpin).
+      RESOLVER_INTERNAL_URL: http://resolver:9000
+    depends_on:
+      - resolver
+    volumes:
+      - ./local/library/music:/music
+
+  resolver:
+    build: ./local/resolver
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+    environment:
+      # Auto-fetch PO tokens from the bgutil sidecar → passes YouTube's bot check
+      # with no manual cookie upkeep. (cookies.txt below still works as fallback.)
+      POT_PROVIDER_URL: http://bgutil-provider:4416
+      # Advanced: if YouTube blocks this server's datacenter IP, route yt-dlp out
+      # through a residential IP via a reverse-SSH SOCKS proxy on the host.
+      # Uncomment ONLY once that tunnel runs, or every request fails:
+      # YTDLP_PROXY: socks5h://host.docker.internal:1080
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - bgutil-provider
+    volumes:
+      - resolver-data:/data
+      # Writable so the app can push cookies here (POST /cookies); also holds a
+      # manual cookies.txt if you drop one in. See cookies/README.md.
+      - ./cookies:/cookies
+
+  # PO-token provider sidecar. Needs host.docker.internal too so it can mint
+  # tokens through the tunnel proxy when one is set (see resolver).
+  bgutil-provider:
+    image: brainicism/bgutil-ytdlp-pot-provider:latest
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  db-data:
+  resolver-data:
