@@ -227,6 +227,13 @@ curl "http://localhost:8091/playlists"   # folders
 
 ## License
 
-**GPL-3.0-or-later** — see [LICENSE](LICENSE). The library server links **mutagen**
-(GPL-2.0-or-later); everything else (FastAPI, uvicorn, httpx) is permissive
-(MIT/BSD) and GPL-compatible.
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+
+Neutrino Server is Free Software: you can use, study, share, and improve it at
+will. Specifically you can redistribute and/or modify it under the terms of the
+[GNU General Public License](https://www.gnu.org/licenses/gpl-3.0.html) as
+published by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version. Full text: [LICENSE](LICENSE).
+
+The library server links **mutagen** (GPL-2.0-or-later); everything else (FastAPI,
+uvicorn, httpx) is permissive (MIT/BSD) and GPL-compatible.
