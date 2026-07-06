@@ -63,6 +63,7 @@ List → add **Ingress** rules, source `0.0.0.0/0`:
 | 22   | SSH |
 | 80   | HTTP (cert issuing) |
 | 443  | HTTPS |
+| 8091 | Library server (plain HTTP variant) |
 
 **Inside the VM** (Oracle images ship a locked-down firewall too):
 
