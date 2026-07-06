@@ -216,3 +216,13 @@ curl "http://localhost:8091/playlists"   # folders
   can see or use it unless you give them the URL.
 - Keep `.env` private (holds your domain config). Your music stays on the server;
   it's git-ignored so it never gets committed.
+
+## License
+
+**GPL-3.0-or-later** — see [LICENSE](LICENSE). The library server links **mutagen**
+(GPL-2.0-or-later); everything else (FastAPI, uvicorn, httpx) is permissive
+(MIT/BSD) and GPL-compatible.
+
+```
+SPDX-License-Identifier: GPL-3.0-or-later
+```
