@@ -1,8 +1,7 @@
-"""Self-hosted local music library, served in the same shape the app's
-Piped-compatible custom-backend source already understands (/search,
-/streams/{id}). Point the app's "Install a source" at this server and your
-own files show up alongside (or instead of) any other source — fully your
-own content, nothing fetched from anywhere else.
+"""Self-hosted cloud music library for the Neutrino app. Serves your own files
+in the shape the app's custom-source API understands (/search, /streams/{id},
+/playlists, /upload). Point Settings -> My Server at this box — fully your own
+content, nothing fetched from anywhere else.
 """
 
 import base64
@@ -169,8 +168,8 @@ def rescan():
     return {"tracks": _rescan()}
 
 
-# Files pulled in via /import land here, so they're easy to find/clear out
-# separately from files you put in yourself.
+# Files uploaded from the app (with no folder given) land here, so they're easy
+# to find/clear out separately from files you put in yourself.
 IMPORTED_DIR = MUSIC_DIR / "Imported"
 
 _SAFE_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -181,75 +180,13 @@ def _safe_filename(name: str) -> str:
 
 
 def _target_dir(folder: str) -> Path:
-    """Where an imported/uploaded file lands. A [folder] (e.g. a playlist name)
-    becomes a top-level subfolder of the music dir — so it shows up as its own
+    """Where an uploaded file lands. A [folder] (e.g. a playlist name) becomes a
+    top-level subfolder of the music dir — so it shows up as its own
     folder-playlist — otherwise files go to the shared Imported/ folder."""
     folder = _SAFE_NAME.sub("_", (folder or "").strip()).strip(" .")
     dest = (MUSIC_DIR / folder) if folder else IMPORTED_DIR
     dest.mkdir(parents=True, exist_ok=True)
     return dest
-
-
-class ImportRequest(BaseModel):
-    resolver_url: str
-    page_url: str
-    folder: str = ""
-
-
-@app.post("/import")
-def import_track(req: ImportRequest):
-    """Resolve [req.page_url] via the caller's own Cobalt-style resolver and
-    save the audio straight into this server's library (Imported/ folder),
-    instead of round-tripping the bytes through the phone. The resolver is
-    whatever the app has configured — this server does no extraction of its
-    own, same neutral-tool model as the app's phone-side download."""
-    # The app passes its *public* resolver URL (right for the phone), but this
-    # server runs alongside the resolver on the Docker network — and a container
-    # can't reach its own host's public IP (no NAT hairpin on most clouds incl.
-    # Oracle). Prefer the internal address when the deployment sets one.
-    resolver = (os.environ.get("RESOLVER_INTERNAL_URL") or req.resolver_url).strip().rstrip("/")
-    if not resolver:
-        raise HTTPException(status_code=400, detail="No resolver configured")
-    if not req.page_url.strip():
-        raise HTTPException(status_code=400, detail="No link given")
-
-    try:
-        r = httpx.post(
-            resolver,
-            json={"url": req.page_url, "downloadMode": "audio"},
-            headers={"Accept": "application/json"},
-            timeout=30.0,
-        )
-        r.raise_for_status()
-        resolved = r.json()
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Resolver request failed: {e}")
-
-    audio_url = resolved.get("url")
-    if not audio_url:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Resolver couldn't produce audio (status: {resolved.get('status', 'unknown')})",
-        )
-
-    filename = _safe_filename(resolved.get("filename") or "download")
-    if not any(filename.lower().endswith(ext) for ext in AUDIO_EXTS):
-        filename += ".mp3"
-
-    target = _target_dir(req.folder)
-    dest = target / filename
-    try:
-        with httpx.stream("GET", audio_url, timeout=60.0) as resp:
-            resp.raise_for_status()
-            with open(dest, "wb") as f:
-                for chunk in resp.iter_bytes(1024 * 64):
-                    f.write(chunk)
-    except Exception as e:
-        dest.unlink(missing_ok=True)
-        raise HTTPException(status_code=502, detail=f"Download failed: {e}")
-
-    _rescan()
-    return {"saved": str(dest.relative_to(MUSIC_DIR)), "tracks": len(_tracks)}
 
 
 @app.post("/upload")
@@ -335,8 +272,7 @@ def search(request: Request, q: str = "", filter: str = ""):
 def playlists():
     """Folder-as-playlist listing. Each top-level subfolder of the music dir is
     a playlist; loose files at the root collapse into a "Singles" entry. This is
-    an optional endpoint — plain Piped backends won't have it, and the app falls
-    back to search-only when it 404s."""
+    an optional endpoint — the app falls back to search-only when it 404s."""
     counts: dict[str, int] = {}
     names: dict[str, str] = {}
     for path in _tracks.values():

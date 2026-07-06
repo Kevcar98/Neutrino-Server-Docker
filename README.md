@@ -1,8 +1,11 @@
-# Neutrino Server — easy install (with YouTube)
+# Neutrino Server
 
-The self-hosted backend for the **Neutrino** music player app. One self-contained
-server: your own music library + search/streaming + YouTube, all in one
-`docker compose up`. Clone or unzip this wherever you're deploying from.
+Your own **cloud music library** for the **Neutrino** app. A small self-hosted
+server that stores your music and serves it back to the app — upload from the
+phone, browse folders as playlists, stream, and delete. One `docker compose up`.
+
+It only ever serves **your own files**. No search engines, no extraction, nothing
+fetched from anywhere — just your library on a box you control.
 
 Takes ~20–30 minutes on a free Oracle Cloud server, no ongoing cost.
 
@@ -13,7 +16,7 @@ Takes ~20–30 minutes on a free Oracle Cloud server, no ongoing cost.
 | **HTTPS** (recommended) | Yes — free ones work (DuckDNS, Cloudflare) | Yes, automatic |
 | **Plain HTTP** (IP only) | No — just your server IP | No |
 
-- **Have a domain or want a free one?** Follow **HTTPS setup** below (steps 1–9).
+- **Have a domain or want a free one?** Follow **HTTPS setup** (steps 1–8).
 - **Just IP, LAN or testing?** Skip to **Plain HTTP setup**.
 
 ---
@@ -26,16 +29,15 @@ Takes ~20–30 minutes on a free Oracle Cloud server, no ongoing cost.
    Always Free resources don't charge).
 2. **Compute → Instances → Create instance.**
    - **Image:** Canonical **Ubuntu 22.04**.
-   - **Shape:** *Ampere* → **VM.Standard.A1.Flex** → **2 OCPU / 12 GB** (within
-     Always Free). If unavailable in your region, try the AMD
-     **VM.Standard.E2.1.Micro** instead (smaller, still free).
+   - **Shape:** *Ampere* → **VM.Standard.A1.Flex** → **1 OCPU / 6 GB** is plenty
+     (still Always Free). If Ampere is unavailable in your region, the AMD
+     **VM.Standard.E2.1.Micro** also works.
    - **SSH keys:** upload your public key (or let it generate + download one).
 3. Create it, and note the instance's **public IP**.
 
 ### 2. Connect to it (PuTTY)
 
-1. Download **PuTTY** (and **PuTTYgen**, bundled with it):
-   <https://www.putty.org/>
+1. Download **PuTTY** (and **PuTTYgen**, bundled with it): <https://www.putty.org/>
 2. Oracle's key download is an OpenSSH key — PuTTY needs its own `.ppk` format,
    so convert it first:
    - Open **PuTTYgen** → **Conversions → Import key** → pick the private key
@@ -46,8 +48,7 @@ Takes ~20–30 minutes on a free Oracle Cloud server, no ongoing cost.
    - **Port:** 22
    - Left tree → **Connection → SSH → Auth → Credentials** → **Private key
      file for authentication** → browse to `oracle-key.ppk`.
-   - (Optional) Back in **Session**, type a name under **Saved Sessions** →
-     **Save**, so you don't redo this every time.
+   - (Optional) Back in **Session**, save it under **Saved Sessions**.
 4. **Open** → accept the host key prompt on first connect → you're in.
 
 Run everything below **inside that PuTTY session**.
@@ -79,7 +80,7 @@ sudo usermod -aG docker $USER
 exit
 ```
 
-Reconnect (reopen PuTTY, same saved session as step 2), then confirm:
+Reconnect (reopen PuTTY, same saved session), then confirm:
 
 ```bash
 docker --version && docker compose version
@@ -87,14 +88,11 @@ docker --version && docker compose version
 
 ### 5. Point your domain at it
 
-If you don't have a domain, get any cheap one (or a free one from a provider like
-Duck DNS / Cloudflare). Add these A/AAAA records → your instance's public IP:
+If you don't have a domain, get any cheap one (or a free one from Duck DNS /
+Cloudflare). Add one A/AAAA record → your instance's public IP:
 
 ```
-api.<your-domain>
-proxy.<your-domain>
 library.<your-domain>
-ytresolver.<your-domain>
 ```
 
 DNS has to resolve **before** you start the stack, or the free HTTPS certificate
@@ -108,136 +106,112 @@ step will fail.
    - **Host:** `<instance-public-ip>`
    - **Logon Type:** Key file
    - **User:** `ubuntu`
-   - **Key file:** browse to your private key — either the original one from
-     Oracle, or the `.ppk` you made in step 2 (FileZilla accepts both)
-3. **Connect.**
-4. On the right (remote) side, navigate into `/home/ubuntu/`.
-5. On the left (local) side, find this folder on your PC.
-6. Drag the whole folder from the left panel to the right panel to upload it.
-   Rename it to `backend` on the way if you like — matches the `cd` below.
+   - **Key file:** browse to your private key (the original from Oracle or the
+     `.ppk` — FileZilla accepts both)
+3. **Connect.** On the right (remote) side go into `/home/ubuntu/`, on the left
+   find this folder, drag it across. Rename it to `neutrino-server` if you like
+   (matches the `cd` below).
 
 ### 7. Configure it
 
-Back in your PuTTY session:
-
 ```bash
-cd ~/backend
+cd ~/neutrino-server
 
 cp .env.example .env
-nano .env                  # set DOMAIN + a strong DB_PASSWORD
-
-nano config.properties     # replace every <your-domain>,
-                            # and set the password to match .env
+nano .env                  # set DOMAIN to your real domain
 ```
 
-*(Optional)* Put your own music in `local/library/music/` before starting it, so
-your library shows up right away — otherwise it starts empty and you can add
-files later.
+*(Optional)* Put your own music in `local/library/music/` now, so your library
+shows up right away — otherwise it starts empty and you upload from the app later.
 
 ### 8. Start it
 
 ```bash
 docker compose up -d
-docker compose logs -f caddy backend library resolver
+docker compose logs -f caddy library
 ```
 
-Give it a minute or two for HTTPS certificates, then check:
+Give it a minute for the HTTPS certificate, then check:
 
 ```bash
-curl "https://api.<your-domain>/search?q=test&filter=music_songs"   # JSON
-curl "https://library.<your-domain>/playlists"                       # your folders
-curl "https://ytresolver.<your-domain>/health"                       # {"status":"ok",...}
+curl "https://library.<your-domain>/health"      # {"status":"ok",...}
+curl "https://library.<your-domain>/playlists"   # your folders
 ```
 
 ### 9. Add it to the app
 
-In the Music Player app:
-
-1. **Settings → My Server**
-   - **Host:** `https://<your-domain>`
-   - Save — this wires up search/streaming and your library at once.
-2. **Settings → Sources → Install a source**
-   - **Name:** `YouTube`
-   - **URL:** `https://ytresolver.<your-domain>`
-   - Test → **Install**.
-
-That's it — search now covers your library + YouTube, playback works everywhere,
-and downloads/uploads route through your own server.
+In Neutrino: **Settings → My Server** → **Host:** `https://library.<your-domain>`
+→ **Save**. Your library, uploads, and playback now route through your own server.
 
 ---
 
 ## Plain HTTP setup (no domain, IP only)
 
-### 1. Create and connect to server (same as HTTPS steps 1–2)
+### 1. Create and connect to server
 
-Follow **HTTPS steps 1–2** above — create an Oracle instance, connect with PuTTY.
+Follow **HTTPS steps 1–2** — create an Oracle instance, connect with PuTTY.
 
 ### 2. Reserve your public IP (don't skip this)
 
 Oracle's default public IP is **ephemeral** — it can change if the instance stops
-and restarts, breaking every URL you configure below. Make it permanent instead,
-still free:
+and restarts, breaking your URL. Make it permanent, still free:
 
 1. Oracle console → **Networking → IP Management → Reserved Public IPs**.
 2. **Create Reserved Public IP.**
-3. Go to your instance → **Attached VNICs** → the VNIC → **IPv4 addresses** →
-   edit the public IP → switch it from **Ephemeral** to the **Reserved** IP you
-   just created.
-4. Your instance's public IP is now permanent. Use it everywhere below.
+3. Instance → **Attached VNICs** → the VNIC → **IPv4 addresses** → edit the
+   public IP → switch **Ephemeral** to the **Reserved** IP you just made.
 
-### 4. Open firewall (same as HTTPS step 3)
+### 3. Open firewall
 
-Follow **HTTPS step 3** — both cloud and VM firewall layers.
+Follow **HTTPS step 3**, but the port you need open is **8091** (not 80/443):
 
-### 5. Install Docker (same as HTTPS step 4)
+```bash
+sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 8091 -j ACCEPT
+sudo netfilter-persistent save
+```
+
+Add the matching **Ingress** rule (port 8091, source `0.0.0.0/0`) on the cloud side too.
+
+### 4. Install Docker
 
 Follow **HTTPS step 4**.
 
-### 6. Upload folder and configure
+### 5. Upload the folder and start it
+
+Upload as in **HTTPS step 6**. No `.env` needed for plain HTTP.
 
 ```bash
-cd ~/backend
-cp .env.example .env
-nano .env                  # set strong DB_PASSWORD (DOMAIN line doesn't matter)
-
-nano config.properties.http   # replace every <server-ip> with your
-                               # reserved public IP from step 2
-```
-
-### 7. Start with plain HTTP
-
-```bash
+cd ~/neutrino-server
 docker compose -f docker-compose.http.yml up -d
-docker compose -f docker-compose.http.yml logs -f backend library resolver
+docker compose -f docker-compose.http.yml logs -f library
 ```
 
-Give it 30 seconds, then check:
+Check (locally on the server):
 
 ```bash
-curl "http://localhost:8080/search?q=test&filter=music_songs"   # JSON
-curl "http://localhost:8091/playlists"                           # folders
-curl "http://localhost:9000/health"                              # {"status":"ok",...}
+curl "http://localhost:8091/health"      # {"status":"ok",...}
+curl "http://localhost:8091/playlists"   # folders
 ```
 
-### 8. Add it to the app
+### 6. Add it to the app
 
-In the Music Player app, using your **reserved public IP** from step 2:
-
-1. **Settings → My Server**
-   - **Host:** `http://<server-ip>` (e.g. `http://140.238.x.x`)
-   - Save.
-2. **Settings → Sources → Install a source**
-   - **Name:** `YouTube`
-   - **URL:** `http://<server-ip>:9000`
-   - Test → **Install**.
+**Settings → My Server** → **Host:** `http://<server-ip>:8091` (your reserved IP)
+→ **Save**.
 
 ---
 
+## Adding music
+
+- Drop files (or whole folders — each folder becomes a playlist) into
+  `local/library/music/` on the server, then hit **rescan** from the app or
+  `curl -X POST .../rescan`.
+- Or upload straight from the app — anything you save to the server lands here.
+- Cover art/artist come from the files' own tags; missing art is filled in from
+  the free iTunes lookup (set `LIBRARY_ONLINE_ENRICH=0` to stay fully offline).
+
 ## Notes
 
-- This is **your own** server — nobody else needs to be running anything for it
-  to work, and nobody else can see or use it unless you give them the URL.
-- YouTube can break for a bit whenever they change something; it usually
-  self-heals within a day (the resolver auto-updates its extractor on restart).
-- Keep `.env` and `config.properties` / `config.properties.http` private — they
-  hold your DB password.
+- This is **your own** server — nobody else needs to run anything, and nobody
+  can see or use it unless you give them the URL.
+- Keep `.env` private (holds your domain config). Your music stays on the server;
+  it's git-ignored so it never gets committed.

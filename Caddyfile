@@ -1,17 +1,6 @@
 # Automatic HTTPS via Let's Encrypt. DOMAIN comes from .env.
-
-api.{$DOMAIN} {
-	reverse_proxy backend:8080
-}
-
-proxy.{$DOMAIN} {
-	reverse_proxy proxy:8080
-}
+# The library server is the whole backend — one subdomain.
 
 library.{$DOMAIN} {
 	reverse_proxy library:8091
-}
-
-ytresolver.{$DOMAIN} {
-	reverse_proxy resolver:9000
 }
