@@ -230,7 +230,3 @@ curl "http://localhost:8091/playlists"   # folders
 **GPL-3.0-or-later** — see [LICENSE](LICENSE). The library server links **mutagen**
 (GPL-2.0-or-later); everything else (FastAPI, uvicorn, httpx) is permissive
 (MIT/BSD) and GPL-compatible.
-
-```
-SPDX-License-Identifier: GPL-3.0-or-later
-```
