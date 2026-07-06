@@ -162,16 +162,24 @@ and restarts, breaking your URL. Make it permanent, still free:
 3. Instance → **Attached VNICs** → the VNIC → **IPv4 addresses** → edit the
    public IP → switch **Ephemeral** to the **Reserved** IP you just made.
 
-### 3. Open firewall
+### 3. Open the firewall (two layers — both needed)
 
-Follow **HTTPS step 3**, but the port you need open is **8091** (not 80/443):
+For plain HTTP the port you need open is **8091** (not 80/443).
+
+**Cloud side:** in the Oracle console → your instance's VCN → subnet → Security
+List → add **Ingress** rules, source `0.0.0.0/0`:
+
+| Port | Purpose |
+|-----:|---------|
+| 22   | SSH |
+| 8091 | Library server |
+
+**Inside the VM** (Oracle images ship a locked-down firewall too):
 
 ```bash
 sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 8091 -j ACCEPT
 sudo netfilter-persistent save
 ```
-
-Add the matching **Ingress** rule (port 8091, source `0.0.0.0/0`) on the cloud side too.
 
 ### 4. Install Docker
 
