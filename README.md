@@ -16,8 +16,8 @@ Takes ~20–30 minutes on a free Oracle Cloud server, no ongoing cost.
 | **HTTPS** (recommended) | Yes — free ones work (DuckDNS, Cloudflare) | Yes, automatic |
 | **Plain HTTP** (IP only) | No — just your server IP | No |
 
-- **Have a domain or want a free one?** Follow **HTTPS setup** (steps 1–8).
-- **Just IP, LAN or testing?** Skip to **Plain HTTP setup**.
+- **Have a domain or want a free one?** Follow **[HTTPS setup](#https-setup-with-domain)** (steps 1–9).
+- **Just IP, LAN or testing?** Skip to **[Plain HTTP setup](#plain-http-setup-no-domain-ip-only)**.
 
 ---
 
