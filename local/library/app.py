@@ -217,7 +217,13 @@ async def upload_track(file: UploadFile = File(...), folder: str = Form("")):
         raise HTTPException(status_code=500, detail=f"Save failed: {e}")
 
     _rescan()
-    return {"saved": str(dest.relative_to(MUSIC_DIR)), "tracks": len(_tracks)}
+    # Report the written size so the client can verify the upload landed complete
+    # (and re-upload if it was truncated).
+    return {
+        "saved": str(dest.relative_to(MUSIC_DIR)),
+        "size": dest.stat().st_size,
+        "tracks": len(_tracks),
+    }
 
 
 def _track_item(track_id: str, path: Path, base_url: str) -> dict:
@@ -234,6 +240,8 @@ def _track_item(track_id: str, path: Path, base_url: str) -> dict:
         # Always a resolvable URL; /art decides embedded-vs-online lazily.
         "thumbnail": f"{base_url}/art/{track_id}",
         "duration": int(duration) if duration else None,
+        # File size so the client can detect an incomplete/truncated stored copy.
+        "size": path.stat().st_size,
         "type": "stream",
     }
 
