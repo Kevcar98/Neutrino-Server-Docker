@@ -147,9 +147,19 @@ In Neutrino: **Settings → My Server** → **Host:** `https://library.<your-dom
 
 ## Plain HTTP setup (no domain, IP only)
 
-### 1. Create and connect to server
+A complete, standalone walkthrough — no domain, just your server's IP on port 8091.
 
-Follow **HTTPS steps 1–2** — create an Oracle instance, connect with PuTTY.
+### 1. Create a free Oracle Cloud server
+
+1. Sign up at <https://www.oracle.com/cloud/free/> (a card is required for identity;
+   Always Free resources don't charge).
+2. **Compute → Instances → Create instance.**
+   - **Image:** Canonical **Ubuntu 22.04**.
+   - **Shape:** *Ampere* → **VM.Standard.A1.Flex** → **1 OCPU / 6 GB** is plenty
+     (still Always Free). If Ampere is unavailable in your region, the AMD
+     **VM.Standard.E2.1.Micro** also works.
+   - **SSH keys:** upload your public key (or let it generate + download one).
+3. Create it, and note the instance's **public IP**.
 
 ### 2. Reserve your public IP (don't skip this)
 
@@ -161,9 +171,27 @@ and restarts, breaking your URL. Make it permanent, still free:
 3. Instance → **Attached VNICs** → the VNIC → **IPv4 addresses** → edit the
    public IP → switch **Ephemeral** to the **Reserved** IP you just made.
 
-### 3. Open the firewall (two layers — both needed)
+### 3. Connect to it (PuTTY)
 
-For plain HTTP the port you need open is **8091** (not 80/443).
+1. Download **PuTTY** (and **PuTTYgen**, bundled with it): <https://www.putty.org/>
+2. Oracle's key download is an OpenSSH key — PuTTY needs its own `.ppk` format,
+   so convert it first:
+   - Open **PuTTYgen** → **Conversions → Import key** → pick the private key
+     Oracle gave you.
+   - **Save private key** → save as e.g. `oracle-key.ppk`.
+3. Open **PuTTY**:
+   - **Host Name:** `ubuntu@<your-reserved-ip>`
+   - **Port:** 22
+   - Left tree → **Connection → SSH → Auth → Credentials** → **Private key
+     file for authentication** → browse to `oracle-key.ppk`.
+   - (Optional) Back in **Session**, save it under **Saved Sessions**.
+4. **Open** → accept the host key prompt on first connect → you're in.
+
+Run everything below **inside that PuTTY session**.
+
+### 4. Open the firewall (two layers — both needed)
+
+For plain HTTP the only port you need open is **8091**.
 
 **Cloud side:** in the Oracle console → your instance's VCN → subnet → Security
 List → add **Ingress** rules, source `0.0.0.0/0`:
@@ -180,16 +208,36 @@ sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 8091 -j ACCEPT
 sudo netfilter-persistent save
 ```
 
-### 4. Install Docker
-
-Follow **HTTPS step 4**.
-
-### 5. Clone the repo and start it
-
-Clone it as in **HTTPS step 6** (`git clone …`). No `.env` needed for plain HTTP.
+### 5. Install Docker
 
 ```bash
-cd ~/neutrino-server
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker $USER
+exit
+```
+
+Reconnect (reopen PuTTY, same saved session), then confirm:
+
+```bash
+docker --version && docker compose version
+```
+
+### 6. Get this repo onto the server (git)
+
+```bash
+sudo apt update && sudo apt install -y git
+cd ~
+git clone https://github.com/Kevcar98/Neutrino-Server-Docker.git neutrino-server
+cd neutrino-server
+```
+
+It's a public repo, so no login. To update later: `cd ~/neutrino-server && git pull && docker compose -f docker-compose.http.yml up -d --build`.
+
+### 7. Start it
+
+No `.env` needed for plain HTTP.
+
+```bash
 docker compose -f docker-compose.http.yml up -d
 docker compose -f docker-compose.http.yml logs -f library
 ```
@@ -201,10 +249,10 @@ curl "http://localhost:8091/health"      # {"status":"ok",...}
 curl "http://localhost:8091/playlists"   # folders
 ```
 
-### 6. Add it to the app
+### 8. Add it to the app
 
-**Settings → My Server** → **Host:** `http://<server-ip>:8091` (your reserved IP)
-→ **Save**.
+In Neutrino: **Settings → My Server** → **Host:** `http://<your-reserved-ip>:8091`
+→ **Save**. Your library, uploads, and playback now route through your own server.
 
 ---
 
