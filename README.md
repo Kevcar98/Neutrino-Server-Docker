@@ -99,19 +99,18 @@ library.<your-domain>
 DNS has to resolve **before** you start the stack, or the free HTTPS certificate
 step will fail.
 
-### 6. Upload this folder to the server (FileZilla)
+### 6. Get this repo onto the server (git)
 
-1. Download **FileZilla Client**: <https://filezilla-project.org/download.php?type=client>
-2. **File → Site Manager → New Site.**
-   - **Protocol:** SFTP – SSH File Transfer Protocol
-   - **Host:** `<instance-public-ip>`
-   - **Logon Type:** Key file
-   - **User:** `ubuntu`
-   - **Key file:** browse to your private key (the original from Oracle or the
-     `.ppk` — FileZilla accepts both)
-3. **Connect.** On the right (remote) side go into `/home/ubuntu/`, on the left
-   find this folder, drag it across. Rename it to `neutrino-server` if you like
-   (matches the `cd` below).
+Clone it straight from GitHub in your PuTTY session — no file-transfer tool needed:
+
+```bash
+sudo apt update && sudo apt install -y git
+cd ~
+git clone https://github.com/Kevcar98/Neutrino-Server-Docker.git neutrino-server
+cd neutrino-server
+```
+
+It's a public repo, so no login. To update later: `cd ~/neutrino-server && git pull && docker compose up -d --build`.
 
 ### 7. Configure it
 
@@ -185,9 +184,9 @@ sudo netfilter-persistent save
 
 Follow **HTTPS step 4**.
 
-### 5. Upload the folder and start it
+### 5. Clone the repo and start it
 
-Upload as in **HTTPS step 6**. No `.env` needed for plain HTTP.
+Clone it as in **HTTPS step 6** (`git clone …`). No `.env` needed for plain HTTP.
 
 ```bash
 cd ~/neutrino-server
