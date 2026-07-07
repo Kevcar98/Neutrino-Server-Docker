@@ -362,9 +362,12 @@ def streams(track_id: str, request: Request):
     mime = mimetypes.guess_type(str(path))[0] or "audio/mpeg"
     host = request.headers.get("host", request.url.hostname)
     scheme = request.url.scheme
+    # Append the real file extension so clients that pick a player by extension
+    # (e.g. desktop JavaFX) stream it directly instead of buffering a temp copy.
+    ext = path.suffix.lstrip(".").lower() or "mp3"
     return {
         "audioStreams": [{
-            "url": f"{scheme}://{host}/file/{track_id}",
+            "url": f"{scheme}://{host}/file/{track_id}.{ext}",
             "bitrate": 0,
             "mimeType": mime,
         }]
@@ -373,6 +376,11 @@ def streams(track_id: str, request: Request):
 
 @app.get("/file/{track_id}")
 def file(track_id: str, request: Request):
+    # The /streams url appends the file extension (…/file/<id>.mp3) so players can
+    # detect the format; ids are url-safe base64 (no dots), so strip a trailing
+    # ".<ext>" back off before looking the track up.
+    if "." in track_id:
+        track_id = track_id.rsplit(".", 1)[0]
     path = _tracks.get(track_id)
     if path is None or not path.exists():
         raise HTTPException(status_code=404, detail="Track not found")
