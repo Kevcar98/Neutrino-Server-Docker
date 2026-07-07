@@ -242,6 +242,8 @@ def _track_item(track_id: str, path: Path, base_url: str) -> dict:
         "duration": int(duration) if duration else None,
         # File size so the client can detect an incomplete/truncated stored copy.
         "size": path.stat().st_size,
+        # Last-modified time (epoch seconds) so the app can sort by date.
+        "modified": int(path.stat().st_mtime),
         "type": "stream",
     }
 
