@@ -59,7 +59,29 @@ _MIME_BY_EXT = {
 }
 
 
+def _sniff_container(path: Path) -> Optional[str]:
+    """".m4a"/".mp3" from the file's actual leading bytes, None when unclear.
+    Downloaded files sometimes lie about their container (AAC/MP4 bytes named
+    ".mp3"), and clients that trust the extension or Content-Type then build
+    the wrong decode pipeline."""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(12)
+        if len(head) >= 12 and head[4:8] == b"ftyp":
+            return ".m4a"
+        if head[:3] == b"ID3" or (
+            len(head) >= 2 and head[0] == 0xFF and (head[1] & 0xE0) == 0xE0
+        ):
+            return ".mp3"
+    except Exception:
+        pass
+    return None
+
+
 def _mime_of(path: Path) -> str:
+    sniffed = _sniff_container(path)
+    if sniffed:
+        return _MIME_BY_EXT[sniffed]
     return (
         _MIME_BY_EXT.get(path.suffix.lower())
         or mimetypes.guess_type(str(path))[0]
@@ -227,16 +249,20 @@ def _is_faststart(path: Path) -> bool:
 
 def _ensure_faststart(path: Path) -> None:
     """Remux [path] in place so it streams progressively. No-op when ffmpeg is
-    missing, the file isn't MP4-family, or it's already faststart."""
-    if _FFMPEG is None or path.suffix.lower() not in _MP4_EXTS:
+    missing, the file isn't MP4-family (by name or sniffed content), or it's
+    already faststart."""
+    if _FFMPEG is None:
         return
-    if _is_faststart(path):
+    is_mp4 = path.suffix.lower() in _MP4_EXTS or _sniff_container(path) == ".m4a"
+    if not is_mp4 or _is_faststart(path):
         return
     tmp = path.with_name(path.stem + ".faststart" + path.suffix)
     try:
+        # "-f mp4" pins the muxer: the tmp name inherits the original extension,
+        # which may lie about the container (MP4 bytes named ".mp3").
         proc = subprocess.run(
             [_FFMPEG, "-y", "-loglevel", "error", "-i", str(path),
-             "-c", "copy", "-movflags", "+faststart", str(tmp)],
+             "-c", "copy", "-movflags", "+faststart", "-f", "mp4", str(tmp)],
             capture_output=True, timeout=300,
         )
         if proc.returncode == 0 and tmp.exists() and tmp.stat().st_size > 0:
@@ -312,6 +338,22 @@ async def upload_track(file: UploadFile = File(...), folder: str = Form("")):
     except Exception as e:
         dest.unlink(missing_ok=True)
         raise HTTPException(status_code=500, detail=f"Save failed: {e}")
+
+    # New uploads with a lying extension (MP4 bytes named ".mp3" etc.) get their
+    # real one — safe here because nothing references the file yet. Existing
+    # library files keep their names (their ids are path-based and may already
+    # live in app playlists); _mime_of's content sniff covers those.
+    actual = _sniff_container(dest)
+    if actual and dest.suffix.lower() != actual and not (
+        actual == ".m4a" and dest.suffix.lower() in {".mp4", ".m4b"}
+    ):
+        renamed = dest.with_suffix(actual)
+        n = 1
+        while renamed.exists():
+            renamed = dest.with_name(f"{dest.stem} ({n})").with_suffix(actual)
+            n += 1
+        dest.rename(renamed)
+        dest = renamed
 
     # Make M4A/MP4 uploads progressively streamable before they're indexed.
     _ensure_faststart(dest)
