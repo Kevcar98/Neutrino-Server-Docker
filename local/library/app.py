@@ -39,6 +39,33 @@ AUDIO_EXTS = {
 
 app = FastAPI()
 
+# Explicit audio MIME types. The slim container's mimetypes table has no entry
+# for .m4a and the old fallback served it as audio/mpeg — JavaFX trusts the
+# Content-Type header, built an MP3 pipeline for MP4 data, and failed with
+# ERROR_MEDIA_INVALID. ("audio/x-m4a" is on JavaFX's supported list.)
+_MIME_BY_EXT = {
+    ".mp3": "audio/mpeg",
+    ".m4a": "audio/x-m4a",
+    ".m4b": "audio/x-m4a",
+    ".mp4": "video/mp4",
+    ".aac": "audio/aac",
+    ".flac": "audio/flac",
+    ".ogg": "audio/ogg",
+    ".oga": "audio/ogg",
+    ".opus": "audio/ogg",
+    ".wav": "audio/wav",
+    ".aiff": "audio/x-aiff",
+    ".aif": "audio/x-aiff",
+}
+
+
+def _mime_of(path: Path) -> str:
+    return (
+        _MIME_BY_EXT.get(path.suffix.lower())
+        or mimetypes.guess_type(str(path))[0]
+        or "application/octet-stream"
+    )
+
 # id <-> path mapping, built at startup and refreshable via /rescan.
 _tracks: dict[str, Path] = {}
 
@@ -431,7 +458,7 @@ def streams(track_id: str, request: Request):
     path = _tracks.get(track_id)
     if path is None or not path.exists():
         raise HTTPException(status_code=404, detail="Track not found")
-    mime = mimetypes.guess_type(str(path))[0] or "audio/mpeg"
+    mime = _mime_of(path)
     host = request.headers.get("host", request.url.hostname)
     scheme = request.url.scheme
     # Append the real file extension so clients that pick a player by extension
@@ -458,7 +485,7 @@ def file(track_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Track not found")
 
     file_size = path.stat().st_size
-    mime = mimetypes.guess_type(str(path))[0] or "audio/mpeg"
+    mime = _mime_of(path)
     range_header = request.headers.get("range")
 
     if range_header is None:
