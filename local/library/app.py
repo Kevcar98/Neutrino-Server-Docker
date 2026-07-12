@@ -8,6 +8,9 @@ import base64
 import os
 import mimetypes
 import re
+import shutil
+import subprocess
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -158,9 +161,76 @@ def _rescan() -> int:
     return len(_tracks)
 
 
+# ---- faststart remux --------------------------------------------------------
+# YouTube-origin M4A/MP4 files usually carry their moov atom at the END, which
+# means an HTTP client must download the whole file before it can start
+# decoding (the desktop app's JavaFX player errors with MEDIA_INVALID and falls
+# back to a full temp download — 30s+ on a slow uplink). Remuxing with
+# "-movflags +faststart" moves the moov up front, making the same file
+# progressively streamable. Pure copy, no re-encode, ~instant per file.
+
+_FFMPEG = shutil.which("ffmpeg")
+_MP4_EXTS = {".m4a", ".mp4", ".m4b"}
+
+
+def _is_faststart(path: Path) -> bool:
+    """True when the moov atom precedes mdat (progressively streamable)."""
+    try:
+        with open(path, "rb") as f:
+            while True:
+                header = f.read(8)
+                if len(header) < 8:
+                    return False
+                size = int.from_bytes(header[:4], "big")
+                kind = header[4:8]
+                if kind == b"moov":
+                    return True
+                if kind == b"mdat":
+                    return False
+                if size == 1:  # 64-bit large box
+                    size = int.from_bytes(f.read(8), "big")
+                    f.seek(size - 16, 1)
+                elif size == 0:  # box runs to EOF
+                    return False
+                else:
+                    f.seek(size - 8, 1)
+    except Exception:
+        return True  # unreadable/odd file → leave it alone
+
+
+def _ensure_faststart(path: Path) -> None:
+    """Remux [path] in place so it streams progressively. No-op when ffmpeg is
+    missing, the file isn't MP4-family, or it's already faststart."""
+    if _FFMPEG is None or path.suffix.lower() not in _MP4_EXTS:
+        return
+    if _is_faststart(path):
+        return
+    tmp = path.with_name(path.stem + ".faststart" + path.suffix)
+    try:
+        proc = subprocess.run(
+            [_FFMPEG, "-y", "-loglevel", "error", "-i", str(path),
+             "-c", "copy", "-movflags", "+faststart", str(tmp)],
+            capture_output=True, timeout=300,
+        )
+        if proc.returncode == 0 and tmp.exists() and tmp.stat().st_size > 0:
+            tmp.replace(path)
+        else:
+            tmp.unlink(missing_ok=True)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+
+
+def _faststart_sweep() -> None:
+    """One pass over the whole library, fixing files uploaded before this
+    feature existed. Runs in a background thread at startup."""
+    for p in list(_tracks.values()):
+        _ensure_faststart(p)
+
+
 @app.on_event("startup")
 def startup():
     _rescan()
+    threading.Thread(target=_faststart_sweep, daemon=True).start()
 
 
 @app.post("/rescan")
@@ -216,6 +286,8 @@ async def upload_track(file: UploadFile = File(...), folder: str = Form("")):
         dest.unlink(missing_ok=True)
         raise HTTPException(status_code=500, detail=f"Save failed: {e}")
 
+    # Make M4A/MP4 uploads progressively streamable before they're indexed.
+    _ensure_faststart(dest)
     _rescan()
     # Report the written size so the client can verify the upload landed complete
     # (and re-upload if it was truncated).
