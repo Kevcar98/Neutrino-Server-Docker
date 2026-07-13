@@ -273,11 +273,55 @@ def _ensure_faststart(path: Path) -> None:
         tmp.unlink(missing_ok=True)
 
 
+def _enrich_file(path: Path) -> None:
+    """Embed missing title/artist/cover art into an MP4-family file itself.
+    Old uploads carried metadata in a glued-on ID3 header, which the faststart
+    remux (correctly) stripped — this puts proper MP4 tags back, from the
+    "Artist - Title" filename plus iTunes cover art. Files that already have
+    tags/art are untouched. Best-effort: any failure leaves the file as-is."""
+    if path.suffix.lower() not in _MP4_EXTS:
+        return
+    try:
+        from mutagen.mp4 import MP4, MP4Cover
+
+        title, artist, _ = _read_tags(path)  # falls back to filename parse
+        audio = MP4(path)
+        if audio.tags is None:
+            audio.add_tags()
+        changed = False
+        if not audio.tags.get("\xa9nam") and title:
+            audio.tags["\xa9nam"] = [title]
+            changed = True
+        if not audio.tags.get("\xa9ART") and artist and artist != UNKNOWN_ARTIST:
+            audio.tags["\xa9ART"] = [artist]
+            changed = True
+        if not audio.tags.get("covr"):
+            hit = _itunes_lookup(artist, title)
+            art_url = hit.get("artwork") if hit else None
+            if art_url:
+                r = httpx.get(art_url, timeout=10.0, follow_redirects=True)
+                if r.status_code == 200 and r.content:
+                    fmt = (
+                        MP4Cover.FORMAT_PNG
+                        if r.content[:8] == b"\x89PNG\r\n\x1a\n"
+                        else MP4Cover.FORMAT_JPEG
+                    )
+                    audio.tags["covr"] = [MP4Cover(r.content, imageformat=fmt)]
+                    changed = True
+        if changed:
+            audio.save()
+    except Exception:
+        pass
+
+
 def _faststart_sweep() -> None:
     """One pass over the whole library, fixing files uploaded before this
-    feature existed. Runs in a background thread at startup."""
+    feature existed (remux to faststart, then restore embedded metadata).
+    Runs in a background thread at startup."""
     for p in list(_tracks.values()):
         _ensure_faststart(p)
+    for p in list(_tracks.values()):
+        _enrich_file(p)
 
 
 @app.on_event("startup")
@@ -355,8 +399,10 @@ async def upload_track(file: UploadFile = File(...), folder: str = Form("")):
         dest.rename(renamed)
         dest = renamed
 
-    # Make M4A/MP4 uploads progressively streamable before they're indexed.
+    # Make M4A/MP4 uploads progressively streamable before they're indexed,
+    # and embed tags/art when the incoming bytes carry none.
     _ensure_faststart(dest)
+    _enrich_file(dest)
     _rescan()
     # Report the written size so the client can verify the upload landed complete
     # (and re-upload if it was truncated).
