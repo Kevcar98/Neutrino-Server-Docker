@@ -314,11 +314,37 @@ def _enrich_file(path: Path) -> None:
         pass
 
 
+def _repair_hybrid_id3_mp4(path: Path) -> None:
+    """Uploads made from damaged client files can be an ID3 header glued onto
+    MP4 audio — no MP4 demuxer opens those (Android included). The real
+    container starts right after the tag: strip the ID3 prefix in place, and
+    the normal faststart/enrich passes handle the rest. Real MP3s untouched."""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(10)
+            if head[:3] != b"ID3" or len(head) < 10:
+                return
+            size = ((head[6] & 0x7F) << 21) | ((head[7] & 0x7F) << 14) | ((head[8] & 0x7F) << 7) | (head[9] & 0x7F)
+            tag_end = 10 + size + (10 if (head[5] & 0x10) else 0)
+            f.seek(tag_end)
+            probe = f.read(12)
+            if probe[4:8] != b"ftyp":
+                return  # a real MP3 — leave it alone
+            f.seek(tag_end)
+            rest = f.read()
+        tmp = path.with_name(path.stem + ".strip" + path.suffix)
+        tmp.write_bytes(rest)
+        tmp.replace(path)
+    except Exception:
+        pass
+
+
 def _faststart_sweep() -> None:
     """One pass over the whole library, fixing files uploaded before this
-    feature existed (remux to faststart, then restore embedded metadata).
-    Runs in a background thread at startup."""
+    feature existed (strip hybrid ID3+MP4 damage, remux to faststart, then
+    restore embedded metadata). Runs in a background thread at startup."""
     for p in list(_tracks.values()):
+        _repair_hybrid_id3_mp4(p)
         _ensure_faststart(p)
     for p in list(_tracks.values()):
         _enrich_file(p)
@@ -401,6 +427,7 @@ async def upload_track(file: UploadFile = File(...), folder: str = Form("")):
 
     # Make M4A/MP4 uploads progressively streamable before they're indexed,
     # and embed tags/art when the incoming bytes carry none.
+    _repair_hybrid_id3_mp4(dest)
     _ensure_faststart(dest)
     _enrich_file(dest)
     _rescan()
@@ -424,8 +451,10 @@ def _track_item(track_id: str, path: Path, base_url: str) -> dict:
         "url": f"/watch?v={track_id}",
         "title": title,
         "uploaderName": artist,
-        # Always a resolvable URL; /art decides embedded-vs-online lazily.
-        "thumbnail": f"{base_url}/art/{track_id}",
+        # Always a resolvable URL; /art decides embedded-vs-online lazily. The
+        # mtime version param busts client image caches when the file's
+        # embedded art changes (retag/enrich) — same art url otherwise.
+        "thumbnail": f"{base_url}/art/{track_id}?v={int(path.stat().st_mtime)}",
         "duration": int(duration) if duration else None,
         # File size so the client can detect an incomplete/truncated stored copy.
         "size": path.stat().st_size,
