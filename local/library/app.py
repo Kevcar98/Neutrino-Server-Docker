@@ -223,8 +223,13 @@ _MP4_EXTS = {".m4a", ".mp4", ".m4b"}
 
 
 def _is_faststart(path: Path) -> bool:
-    """True when the moov atom precedes mdat (progressively streamable)."""
+    """True when the file is a PLAIN MP4 with moov before mdat. Fragmented
+    (DASH) files — sidx/moof segments, YouTube's native audio layout — count
+    as NOT faststart even though their moov comes first: some players
+    (Android progressive playback, Windows Media Player) reject them, so
+    they need the same remux to a plain container."""
     try:
+        saw_moov = False
         with open(path, "rb") as f:
             while True:
                 header = f.read(8)
@@ -233,14 +238,16 @@ def _is_faststart(path: Path) -> bool:
                 size = int.from_bytes(header[:4], "big")
                 kind = header[4:8]
                 if kind == b"moov":
-                    return True
-                if kind == b"mdat":
-                    return False
+                    saw_moov = True
+                elif kind in (b"sidx", b"moof"):
+                    return False  # fragmented → remux
+                elif kind == b"mdat":
+                    return saw_moov
                 if size == 1:  # 64-bit large box
                     size = int.from_bytes(f.read(8), "big")
                     f.seek(size - 16, 1)
                 elif size == 0:  # box runs to EOF
-                    return False
+                    return saw_moov
                 else:
                     f.seek(size - 8, 1)
     except Exception:
