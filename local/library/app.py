@@ -561,6 +561,35 @@ def streams(track_id: str, request: Request):
     }
 
 
+class MoveRequest(BaseModel):
+    track_id: str
+    folder: str = ""
+
+
+@app.post("/move")
+def move_track(req: MoveRequest):
+    """Move a track into another top-level folder (folder-playlist). Blank
+    [folder] means the shared Imported/ folder. The track id changes (ids are
+    path-based) — clients should refresh their listings after a move."""
+    path = _tracks.get(req.track_id)
+    if path is None or not path.exists():
+        raise HTTPException(status_code=404, detail="Track not found")
+    dest_dir = _target_dir(req.folder)
+    dest = dest_dir / path.name
+    if dest == path:
+        return {"moved": str(path.relative_to(MUSIC_DIR)), "id": req.track_id}
+    if dest.exists():
+        stem, ext = dest.stem, dest.suffix
+        n = 1
+        while (dest_dir / f"{stem} ({n}){ext}").exists():
+            n += 1
+        dest = dest_dir / f"{stem} ({n}){ext}"
+    path.rename(dest)
+    _rescan()
+    rel = str(dest.relative_to(MUSIC_DIR))
+    return {"moved": rel, "id": _encode_id(rel)}
+
+
 @app.get("/file/{track_id}")
 def file(track_id: str, request: Request):
     # The /streams url appends the file extension (…/file/<id>.mp3) so players can
