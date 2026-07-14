@@ -181,13 +181,38 @@ def _itunes_lookup(artist: str, title: str) -> Optional[dict]:
     try:
         r = httpx.get(
             ITUNES_SEARCH,
-            params={"term": term, "entity": "song", "limit": 1},
+            params={"term": term, "entity": "song", "limit": 5},
             timeout=6.0,
         )
         if r.status_code == 200:
             items = r.json().get("results") or []
-            if items:
-                it = items[0]
+
+            # Only accept a hit that IS this song: matching title, and matching
+            # primary artist when we know one — the raw first result can be a
+            # compilation or a different song entirely (wrong cover embedded).
+            def norm(s):
+                return "".join(ch for ch in (s or "").lower() if ch.isalnum())
+
+            want_title = norm(title)
+            want_artist = "" if artist == UNKNOWN_ARTIST else norm(
+                re.split(r",|&|;", artist)[0]
+            )
+            it = next(
+                (
+                    hit for hit in items
+                    if (t := norm(hit.get("trackName"))) and (
+                        t == want_title or want_title in t or t in want_title
+                    ) and (
+                        not want_artist or (
+                            (a := norm(hit.get("artistName"))) and (
+                                want_artist in a or a in want_artist
+                            )
+                        )
+                    )
+                ),
+                None,
+            )
+            if it:
                 art = it.get("artworkUrl100")
                 # iTunes serves 100px by default; ask for a big banner instead.
                 if art:
