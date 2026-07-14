@@ -266,18 +266,45 @@ def _ensure_faststart(path: Path) -> None:
     tmp = path.with_name(path.stem + ".faststart" + path.suffix)
     try:
         # "-f mp4" pins the muxer: the tmp name inherits the original extension,
-        # which may lie about the container (MP4 bytes named ".mp3").
+        # which may lie about the container (MP4 bytes named ".mp3"). "-map 0"
+        # + "-map_metadata 0" keep every stream (cover art rides as an attached
+        # picture) and the tag atoms.
         proc = subprocess.run(
             [_FFMPEG, "-y", "-loglevel", "error", "-i", str(path),
+             "-map", "0", "-map_metadata", "0",
              "-c", "copy", "-movflags", "+faststart", "-f", "mp4", str(tmp)],
             capture_output=True, timeout=300,
         )
         if proc.returncode == 0 and tmp.exists() and tmp.stat().st_size > 0:
+            _carry_over_mp4_tags(path, tmp)
             tmp.replace(path)
         else:
             tmp.unlink(missing_ok=True)
     except Exception:
         tmp.unlink(missing_ok=True)
+
+
+def _carry_over_mp4_tags(old: Path, new: Path) -> None:
+    """Backstop for ffmpeg dropping MP4 tag atoms on remux: copy title/artist/
+    cover from [old] onto [new] when the new file lacks them. Best-effort."""
+    try:
+        from mutagen.mp4 import MP4
+
+        src = MP4(old)
+        if not src.tags:
+            return
+        dst = MP4(new)
+        if dst.tags is None:
+            dst.add_tags()
+        changed = False
+        for key in ("\xa9nam", "\xa9ART", "covr"):
+            if src.tags.get(key) and not dst.tags.get(key):
+                dst.tags[key] = src.tags[key]
+                changed = True
+        if changed:
+            dst.save()
+    except Exception:
+        pass
 
 
 def _enrich_file(path: Path) -> None:
