@@ -5,12 +5,14 @@ content, nothing fetched from anywhere else.
 """
 
 import base64
+import json
 import os
 import mimetypes
 import re
 import shutil
 import subprocess
 import threading
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -743,6 +745,52 @@ def delete_file(track_id: str):
         raise HTTPException(status_code=500, detail=f"Delete failed: {exc}")
     remaining = _rescan()
     return {"deleted": track_id, "tracks": remaining}
+
+
+# ---- cross-device "now playing" resume ------------------------------------
+# A tiny shared playback bookmark so any device (phone, desktop) can pick up
+# where another left off: the current track (the client's own Track JSON, opaque
+# to the server), the position, and a millisecond timestamp. The client with the
+# NEWER timestamp wins, so the last device to pause/close sets the resume point.
+# Stored as a hidden JSON file in the music dir (ignored by the audio scan).
+NOWPLAYING_FILE = MUSIC_DIR / ".neutrino_nowplaying.json"
+
+
+class NowPlaying(BaseModel):
+    # The client's serialized Track. Opaque here — the receiving client
+    # re-resolves it to a playable copy (its own local file / this server).
+    track: dict
+    positionMs: int = 0
+    durationMs: int = 0
+    # Epoch milliseconds when the sending device last updated. Server stamps it
+    # if the client sends 0.
+    updatedAt: int = 0
+    # Optional human label of the sending device, for debugging.
+    device: str = ""
+
+
+@app.get("/nowplaying")
+def get_nowplaying():
+    """The last shared playback bookmark, or {} if none set yet."""
+    if NOWPLAYING_FILE.exists():
+        try:
+            return json.loads(NOWPLAYING_FILE.read_text("utf-8"))
+        except Exception:
+            pass
+    return {}
+
+
+@app.put("/nowplaying")
+def put_nowplaying(state: NowPlaying):
+    """Record where playback is now, so other devices can resume from here."""
+    data = state.dict()
+    if not data.get("updatedAt"):
+        data["updatedAt"] = int(time.time() * 1000)
+    try:
+        NOWPLAYING_FILE.write_text(json.dumps(data), encoding="utf-8")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Save failed: {exc}")
+    return {"ok": True, "updatedAt": data["updatedAt"]}
 
 
 @app.get("/health")
