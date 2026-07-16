@@ -767,6 +767,13 @@ class NowPlaying(BaseModel):
     updatedAt: int = 0
     # Optional human label of the sending device, for debugging.
     device: str = ""
+    # Full play queue + mode, so the other device continues the whole session.
+    # All opaque to the server; the receiving client re-resolves the tracks.
+    queue: list = []
+    queueIndex: int = 0
+    sourceQueue: list = []
+    shuffle: bool = False
+    repeat: str = "OFF"
 
 
 @app.get("/nowplaying")
