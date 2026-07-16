@@ -256,6 +256,36 @@ In Neutrino: **Settings → My Server** → **Host:** `http://<your-reserved-ip>
 
 ---
 
+## Updating
+
+When this repo gets new features (e.g. cross-device resume), pull the changes and
+rebuild the container. From your PuTTY session:
+
+```bash
+cd ~/neutrino-server
+```
+
+**Plain HTTP (IP only):**
+
+```bash
+git pull && docker compose -f docker-compose.http.yml up -d --build
+```
+
+**HTTPS (with domain):**
+
+```bash
+git pull && docker compose up -d --build
+```
+
+`--build` rebuilds the library image so code changes take effect; `-d` keeps it
+running in the background. Your music in `local/library/music/` and your `.env`
+are untouched — only the app code updates. Confirm it came back up:
+
+```bash
+curl "http://localhost:8091/health"      # plain HTTP
+# curl "https://library.<your-domain>/health"   # HTTPS
+```
+
 ## Adding music
 
 - Drop files (or whole folders — each folder becomes a playlist) into
