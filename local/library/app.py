@@ -800,6 +800,49 @@ def put_nowplaying(state: NowPlaying):
     return {"ok": True, "updatedAt": data["updatedAt"]}
 
 
+# ---- cross-device playlist sync --------------------------------------------
+# A shared backup of the user's playlists + liked songs, so another device can
+# fetch them. Track/playlist JSON is the client's own shape — opaque here; the
+# receiving client merges it into its local library (never wholesale-replaces).
+PLAYLIST_SYNC_FILE = MUSIC_DIR / ".neutrino_playlists.json"
+
+
+class PlaylistSync(BaseModel):
+    playlists: list = []
+    favorites: list = []
+    updatedAt: int = 0
+    device: str = ""
+    # Extended sync payload (all opaque to the server): play-count JSON for a
+    # cross-device Most Played, plus custom themes and source backends.
+    playStatsJson: str = ""
+    themes: list = []
+    sources: list = []
+
+
+@app.get("/syncplaylists")
+def get_playlist_sync():
+    """The last playlist backup, or {} if none pushed yet."""
+    if PLAYLIST_SYNC_FILE.exists():
+        try:
+            return json.loads(PLAYLIST_SYNC_FILE.read_text("utf-8"))
+        except Exception:
+            pass
+    return {}
+
+
+@app.put("/syncplaylists")
+def put_playlist_sync(state: PlaylistSync):
+    """Store this device's playlists + liked songs for other devices to fetch."""
+    data = state.dict()
+    if not data.get("updatedAt"):
+        data["updatedAt"] = int(time.time() * 1000)
+    try:
+        PLAYLIST_SYNC_FILE.write_text(json.dumps(data), encoding="utf-8")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Save failed: {exc}")
+    return {"ok": True, "updatedAt": data["updatedAt"]}
+
+
 @app.get("/health")
 def health():
     return {"status": "ok", "tracks": len(_tracks)}
