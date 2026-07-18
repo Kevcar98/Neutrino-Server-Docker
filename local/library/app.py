@@ -817,6 +817,8 @@ class PlaylistSync(BaseModel):
     playStatsJson: str = ""
     themes: list = []
     sources: list = []
+    selectedThemeId: str = ""
+    settingsOrderCsv: str = ""
 
 
 @app.get("/syncplaylists")
