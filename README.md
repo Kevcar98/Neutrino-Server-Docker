@@ -295,6 +295,23 @@ curl "http://localhost:8091/health"      # plain HTTP
 - Cover art/artist come from the files' own tags; missing art is filled in from
   the free iTunes lookup (set `LIBRARY_ONLINE_ENRICH=0` to stay fully offline).
 
+## Transfer history
+
+Every upload and delete is appended to `.neutrino_transfers.jsonl` in the music
+folder — one JSON object per line, hidden from the audio scan, and kept in the
+same volume as your music so it survives rebuilds. Read it back:
+
+```bash
+curl -s .../transfers?limit=50
+curl -s ".../transfers?folder=My%20Playlist"
+```
+
+Each entry has `at` (epoch ms), `event` (`upload`/`delete`), `file`, `folder`,
+`title`, `artist`, and `size` for uploads. Useful when you want the history from
+a device that didn't do the transfer — the app keeps its own local copy, but
+this one belongs to the library. Delete the file to reset it; nothing depends on
+it existing.
+
 ## Notes
 
 - This is **your own** server — nobody else needs to run anything, and nobody

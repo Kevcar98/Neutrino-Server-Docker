@@ -428,6 +428,71 @@ IMPORTED_DIR = MUSIC_DIR / "Imported"
 
 _SAFE_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
+# ---- transfer log ----------------------------------------------------------
+# An append-only record of what came in and what went out, so the history lives
+# with the library instead of only inside one client. Hidden file in the music
+# dir (ignored by the audio scan), JSON Lines rather than one JSON array: an
+# append is a single write, so a crash or a killed container can't truncate the
+# entries already on disk.
+TRANSFER_LOG = MUSIC_DIR / ".neutrino_transfers.jsonl"
+
+# Appends come from request handlers, which FastAPI may run on several threads.
+_transfer_lock = threading.Lock()
+
+
+def _log_transfer(event: str, path: Path, **extra) -> None:
+    """Record one upload/delete. Never raises — logging must not fail a request."""
+    try:
+        parts = path.relative_to(MUSIC_DIR).parts
+    except ValueError:
+        parts = (path.name,)
+    entry = {
+        "at": int(time.time() * 1000),
+        "event": event,
+        # Always "/"-joined, so the field reads the same whatever the host OS is.
+        "file": "/".join(parts),
+        # Matches /playlists: the top-level subfolder, "" for a loose root file.
+        "folder": parts[0] if len(parts) > 1 else "",
+        **extra,
+    }
+    try:
+        with _transfer_lock:
+            with open(TRANSFER_LOG, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+@app.get("/transfers")
+def transfers(limit: int = 200, folder: str = ""):
+    """Recent transfers, newest first. Optional [folder] filter; limit<=0 = all.
+
+    Lets a client resume against the server's own history rather than its local
+    one — useful after a reinstall, or from a device that never did the upload.
+    """
+    if not TRANSFER_LOG.exists():
+        return {"transfers": []}
+    items = []
+    try:
+        with open(TRANSFER_LOG, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except Exception:
+                    continue  # skip a torn line rather than failing the request
+                if folder and entry.get("folder") != folder:
+                    continue
+                items.append(entry)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Could not read log: {exc}")
+    items.reverse()
+    if limit > 0:
+        items = items[:limit]
+    return {"transfers": items}
+
 
 def _safe_filename(name: str) -> str:
     return _SAFE_NAME.sub("_", name).strip(" .") or "track"
@@ -492,11 +557,16 @@ async def upload_track(file: UploadFile = File(...), folder: str = Form("")):
     _ensure_faststart(dest)
     _enrich_file(dest)
     _rescan()
+    size = dest.stat().st_size
+    # Tags are read after enrichment, so the log carries the same title/artist
+    # the library will show for this file.
+    title, artist, _ = _read_tags(dest)
+    _log_transfer("upload", dest, size=size, title=title, artist=artist)
     # Report the written size so the client can verify the upload landed complete
     # (and re-upload if it was truncated).
     return {
         "saved": str(dest.relative_to(MUSIC_DIR)),
-        "size": dest.stat().st_size,
+        "size": size,
         "tracks": len(_tracks),
     }
 
@@ -739,10 +809,13 @@ def delete_file(track_id: str):
     path = _tracks.get(track_id)
     if path is None or not path.exists():
         raise HTTPException(status_code=404, detail="Track not found")
+    # Read tags before the file is gone, so the log entry is still identifiable.
+    title, artist, _ = _read_tags(path)
     try:
         path.unlink()
     except OSError as exc:
         raise HTTPException(status_code=500, detail=f"Delete failed: {exc}")
+    _log_transfer("delete", path, title=title, artist=artist)
     remaining = _rescan()
     return {"deleted": track_id, "tracks": remaining}
 
@@ -765,8 +838,12 @@ class NowPlaying(BaseModel):
     # Epoch milliseconds when the sending device last updated. Server stamps it
     # if the client sends 0.
     updatedAt: int = 0
-    # Optional human label of the sending device, for debugging.
+    # Which device this bookmark came from, and whether it is actually playing
+    # right now. Together these are what makes handoff possible: another device
+    # can tell "the desktop is playing this" apart from "the desktop stopped
+    # here", and can take over by claiming isPlaying itself.
     device: str = ""
+    isPlaying: bool = False
     # Full play queue + mode, so the other device continues the whole session.
     # All opaque to the server; the receiving client re-resolves the tracks.
     queue: list = []
