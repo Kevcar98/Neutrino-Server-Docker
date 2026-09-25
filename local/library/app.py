@@ -854,14 +854,23 @@ class NowPlaying(BaseModel):
 
 
 @app.get("/nowplaying")
-def get_nowplaying():
-    """The last shared playback bookmark, or {} if none set yet."""
-    if NOWPLAYING_FILE.exists():
-        try:
-            return json.loads(NOWPLAYING_FILE.read_text("utf-8"))
-        except Exception:
-            pass
-    return {}
+def get_nowplaying(compact: bool = False):
+    """The last shared playback bookmark, or {} if none set yet.
+
+    compact=1 drops the queue lists. A phone's home-screen widget only draws a
+    title, an artist, artwork and a position, but the full bookmark carries the
+    play queue too — tens of KB that the widget was repeatedly timing out on.
+    Clients that actually resume playback ask for the full thing.
+    """
+    if not NOWPLAYING_FILE.exists():
+        return {}
+    try:
+        data = json.loads(NOWPLAYING_FILE.read_text("utf-8"))
+    except Exception:
+        return {}
+    if compact:
+        data = {k: v for k, v in data.items() if k not in ("queue", "sourceQueue")}
+    return data
 
 
 @app.put("/nowplaying")
