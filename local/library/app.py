@@ -679,6 +679,17 @@ async def upload_track(
         dest.unlink(missing_ok=True)
         raise HTTPException(status_code=500, detail=f"Save failed: {e}")
 
+    # Strip an ID3 tag glued onto MP4 audio FIRST, then work out what the file
+    # actually is.
+    #
+    # The order matters and used to be the other way round: _sniff_container
+    # sees the ID3 header, says "mp3", and leaves the name alone — then the
+    # repair removes that header and the file is left as an MP4 called ".mp3"
+    # for good. Clients then fail to open it with
+    # UnrecognizedInputFormatException, which is exactly what a phone reported
+    # against a track uploaded this way.
+    _repair_hybrid_id3_mp4(dest)
+
     # New uploads with a lying extension (MP4 bytes named ".mp3" etc.) get their
     # real one — safe here because nothing references the file yet. Existing
     # library files keep their names (their ids are path-based and may already
@@ -697,7 +708,6 @@ async def upload_track(
 
     # Make M4A/MP4 uploads progressively streamable before they're indexed,
     # and embed tags/art when the incoming bytes carry none.
-    _repair_hybrid_id3_mp4(dest)
     _ensure_faststart(dest)
     # The client's own banner goes on first, so _enrich_file only has to fill
     # what is genuinely still missing (it skips anything already tagged).
