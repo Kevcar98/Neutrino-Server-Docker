@@ -5,6 +5,7 @@ content, nothing fetched from anywhere else.
 """
 
 import base64
+import hashlib
 import json
 import os
 import mimetypes
@@ -141,6 +142,127 @@ def _read_tags(path: Path) -> tuple[str, str, Optional[float]]:
     title = tag_title or fn_title or title
     artist = tag_artist or fn_artist or UNKNOWN_ARTIST
     return title, artist, duration
+
+
+# ---- cover-art cache --------------------------------------------------------
+# Resolving art is expensive in exactly the place it can least afford to be: a
+# file with no embedded cover sends /art off to iTunes and then downloads the
+# image, on every single request. The phone's widget asks for art on every
+# repaint, so a flaky link turned that into seconds of stall per draw. Resolved
+# art is written here once and served from disk after that — which also means
+# covers keep working when iTunes is unreachable.
+#
+# Lives beside the other hidden state files in the music dir, so it survives a
+# container restart through the same bind mount. Image files are not in
+# AUDIO_EXTS, so the scanner never sees them.
+ART_CACHE_DIR = MUSIC_DIR / ".neutrino_art"
+
+_ART_EXT_BY_MIME = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+}
+
+
+def _art_cache_name(track_id: str) -> str:
+    """A track id is a base64 path and can be longer than a filename may be, so
+    the cache is keyed by its digest rather than the id itself."""
+    return hashlib.sha1(track_id.encode()).hexdigest()
+
+
+def _art_cache_read(track_id: str) -> Optional[tuple[bytes, str]]:
+    name = _art_cache_name(track_id)
+    for mime, ext in _ART_EXT_BY_MIME.items():
+        path = ART_CACHE_DIR / f"{name}{ext}"
+        try:
+            if path.exists():
+                data = path.read_bytes()
+                if data:
+                    return data, mime
+        except Exception:
+            pass
+    return None
+
+
+def _art_cache_write(track_id: str, data: bytes, mime: str) -> None:
+    if not data:
+        return
+    try:
+        ART_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        ext = _ART_EXT_BY_MIME.get(mime, ".jpg")
+        (ART_CACHE_DIR / f"{_art_cache_name(track_id)}{ext}").write_bytes(data)
+    except Exception:
+        pass
+
+
+def _fetch_art(url: str) -> Optional[tuple[bytes, str]]:
+    """Download cover art bytes from [url]. Never raises."""
+    if not url:
+        return None
+    try:
+        r = httpx.get(url, timeout=10.0, follow_redirects=True)
+        if r.status_code == 200 and r.content:
+            mime = r.headers.get("content-type", "image/jpeg").split(";")[0].strip()
+            if not mime.startswith("image/"):
+                mime = "image/jpeg"
+            return r.content, mime
+    except Exception:
+        pass
+    return None
+
+
+def _embed_banner(path: Path, title: str, artist: str, art: Optional[tuple[bytes, str]]) -> None:
+    """Write title/artist/cover into [path]'s own tags, for MP3 and MP4 alike.
+
+    The client knows all three — it is playing the song — so an upload can hand
+    them over instead of leaving the server to guess them back from the
+    filename and an iTunes search. Only fills gaps: anything the file already
+    carries is left alone. Best-effort; a tagging failure must not fail an
+    upload that otherwise succeeded."""
+    ext = path.suffix.lower()
+    try:
+        if ext in _MP4_EXTS:
+            from mutagen.mp4 import MP4, MP4Cover
+
+            audio = MP4(path)
+            if audio.tags is None:
+                audio.add_tags()
+            changed = False
+            if title and not audio.tags.get("©nam"):
+                audio.tags["©nam"] = [title]
+                changed = True
+            if artist and artist != UNKNOWN_ARTIST and not audio.tags.get("©ART"):
+                audio.tags["©ART"] = [artist]
+                changed = True
+            if art and not audio.tags.get("covr"):
+                data, mime = art
+                fmt = MP4Cover.FORMAT_PNG if mime == "image/png" else MP4Cover.FORMAT_JPEG
+                audio.tags["covr"] = [MP4Cover(data, imageformat=fmt)]
+                changed = True
+            if changed:
+                audio.save()
+        elif ext == ".mp3":
+            from mutagen.id3 import ID3, APIC, TIT2, TPE1, ID3NoHeaderError
+
+            try:
+                tags = ID3(path)
+            except ID3NoHeaderError:
+                tags = ID3()
+            changed = False
+            if title and not tags.getall("TIT2"):
+                tags.add(TIT2(encoding=3, text=[title]))
+                changed = True
+            if artist and artist != UNKNOWN_ARTIST and not tags.getall("TPE1"):
+                tags.add(TPE1(encoding=3, text=[artist]))
+                changed = True
+            if art and not tags.getall("APIC"):
+                data, mime = art
+                tags.add(APIC(encoding=3, mime=mime, type=3, desc="Cover", data=data))
+                changed = True
+            if changed:
+                tags.save(path)
+    except Exception:
+        pass
 
 
 def _embedded_art(path: Path) -> Optional[tuple[bytes, str]]:
@@ -340,7 +462,18 @@ def _enrich_file(path: Path) -> None:
     remux (correctly) stripped — this puts proper MP4 tags back, from the
     "Artist - Title" filename plus iTunes cover art. Files that already have
     tags/art are untouched. Best-effort: any failure leaves the file as-is."""
-    if path.suffix.lower() not in _MP4_EXTS:
+    ext = path.suffix.lower()
+    if ext == ".mp3":
+        # MP3 uploads used to fall straight through here, so a phone-local file
+        # with no cover of its own reached the server bare and every /art
+        # request re-derived it from iTunes. Give it the same treatment MP4 has
+        # always had.
+        title, artist, _ = _read_tags(path)
+        hit = _itunes_lookup(artist, title)
+        art = _fetch_art(hit.get("artwork") if hit else "")
+        _embed_banner(path, title, artist, art)
+        return
+    if ext not in _MP4_EXTS:
         return
     try:
         from mutagen.mp4 import MP4, MP4Cover
@@ -509,10 +642,21 @@ def _target_dir(folder: str) -> Path:
 
 
 @app.post("/upload")
-async def upload_track(file: UploadFile = File(...), folder: str = Form("")):
+async def upload_track(
+    file: UploadFile = File(...),
+    folder: str = Form(""),
+    title: str = Form(""),
+    artist: str = Form(""),
+    art_url: str = Form(""),
+):
     """Accept a raw audio file uploaded from the app (e.g. a phone-local track)
     and save it into this server's library. A [folder] (playlist name) groups it
-    into a top-level subfolder; otherwise it lands in the shared Imported/ folder."""
+    into a top-level subfolder; otherwise it lands in the shared Imported/ folder.
+
+    [title], [artist] and [art_url] are the banner the client is already showing
+    for this song. Sending them is optional, but when they are there the server
+    embeds them instead of parsing the filename and searching iTunes for a cover
+    — which is both slower and a guess."""
     filename = _safe_filename(file.filename or "upload")
     if not any(filename.lower().endswith(ext) for ext in AUDIO_EXTS):
         filename += ".mp3"
@@ -555,8 +699,19 @@ async def upload_track(file: UploadFile = File(...), folder: str = Form("")):
     # and embed tags/art when the incoming bytes carry none.
     _repair_hybrid_id3_mp4(dest)
     _ensure_faststart(dest)
+    # The client's own banner goes on first, so _enrich_file only has to fill
+    # what is genuinely still missing (it skips anything already tagged).
+    supplied_art = _fetch_art(art_url)
+    if title or artist or supplied_art:
+        _embed_banner(dest, title, artist or UNKNOWN_ARTIST, supplied_art)
     _enrich_file(dest)
     _rescan()
+    # Seed the art cache now that the file is indexed, so the first /art request
+    # — typically a widget repaint — is already a disk read.
+    rel = str(dest.relative_to(MUSIC_DIR))
+    resolved = _embedded_art(dest) or supplied_art
+    if resolved:
+        _art_cache_write(_encode_id(rel), *resolved)
     size = dest.stat().st_size
     # Tags are read after enrichment, so the log carries the same title/artist
     # the library will show for this file.
@@ -677,27 +832,28 @@ def art(track_id: str):
     if path is None or not path.exists():
         raise HTTPException(status_code=404, detail="Track not found")
 
-    embedded = _embedded_art(path)
-    if embedded:
-        data, mime = embedded
+    def served(data: bytes, mime: str) -> Response:
         return Response(content=data, media_type=mime, headers={
             "Cache-Control": "public, max-age=86400",
         })
 
+    # Cheapest first, and the only branch that costs nothing when the network
+    # is down or slow. Everything below writes here on the way out.
+    cached = _art_cache_read(track_id)
+    if cached:
+        return served(*cached)
+
+    embedded = _embedded_art(path)
+    if embedded:
+        _art_cache_write(track_id, *embedded)
+        return served(*embedded)
+
     title, artist, _ = _read_tags(path)
     hit = _itunes_lookup(artist, title)
-    art_url = hit.get("artwork") if hit else None
-    if art_url:
-        try:
-            r = httpx.get(art_url, timeout=8.0, follow_redirects=True)
-            if r.status_code == 200:
-                return Response(
-                    content=r.content,
-                    media_type=r.headers.get("content-type", "image/jpeg"),
-                    headers={"Cache-Control": "public, max-age=86400"},
-                )
-        except Exception:
-            pass
+    fetched = _fetch_art(hit.get("artwork") if hit else "")
+    if fetched:
+        _art_cache_write(track_id, *fetched)
+        return served(*fetched)
     raise HTTPException(status_code=404, detail="No artwork")
 
 
