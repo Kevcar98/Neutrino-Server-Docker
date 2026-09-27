@@ -1015,18 +1015,30 @@ class NowPlaying(BaseModel):
     queue: list = []
     queueIndex: int = 0
     sourceQueue: list = []
+    # Recently played songs, oldest first, ending with the one before `track`.
+    # This is what lets another device go *back* a song after picking the
+    # session up: the queue only describes what is playing and what is next.
+    # Stored like the queue and equally opaque, but served only on request —
+    # see get_nowplaying.
+    history: list = []
     shuffle: bool = False
     repeat: str = "OFF"
 
 
 @app.get("/nowplaying")
-def get_nowplaying(compact: bool = False):
+def get_nowplaying(compact: bool = False, history: bool = False):
     """The last shared playback bookmark, or {} if none set yet.
 
-    compact=1 drops the queue lists. A phone's home-screen widget only draws a
-    title, an artist, artwork and a position, but the full bookmark carries the
-    play queue too — tens of KB that the widget was repeatedly timing out on.
-    Clients that actually resume playback ask for the full thing.
+    Three sizes, because the callers genuinely want different things and this
+    link has proved slow enough that the difference matters:
+
+      * compact=1  — no queues and no history. A phone's home-screen widget
+        draws a title, an artist, artwork and a position, and nothing else; the
+        full bookmark is tens of KB it was repeatedly timing out on.
+      * default    — the queue, enough to resume and play on.
+      * history=1  — also the recently-played list, for going *back* a song.
+        Left out by default so that resuming, which never needs it, doesn't pay
+        for it.
     """
     if not NOWPLAYING_FILE.exists():
         return {}
@@ -1035,8 +1047,12 @@ def get_nowplaying(compact: bool = False):
     except Exception:
         return {}
     if compact:
-        data = {k: v for k, v in data.items() if k not in ("queue", "sourceQueue")}
-    return data
+        drop = ("queue", "sourceQueue", "history")
+    elif not history:
+        drop = ("history",)
+    else:
+        drop = ()
+    return {k: v for k, v in data.items() if k not in drop} if drop else data
 
 
 @app.put("/nowplaying")
