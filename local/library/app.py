@@ -246,6 +246,19 @@ def _fetch_art(url: str) -> Optional[tuple[bytes, str]]:
     return None
 
 
+def _container_of(path: Path) -> str:
+    """What the file actually is, preferring its bytes over its name.
+
+    Tagging must never be chosen by extension. The library holds MP4 audio
+    saved as ".mp3" (an old upload path named every local file that way), and
+    the startup sweep repairs those in place without renaming them — their ids
+    are derived from the path, so a rename would break playlist references.
+    Dispatching on the name would then write an ID3 tag back onto MP4 audio and
+    recreate the exact damage the sweep had just removed.
+    """
+    return _sniff_container(path) or path.suffix.lower()
+
+
 def _embed_banner(path: Path, title: str, artist: str, art: Optional[tuple[bytes, str]]) -> None:
     """Write title/artist/cover into [path]'s own tags, for MP3 and MP4 alike.
 
@@ -254,7 +267,7 @@ def _embed_banner(path: Path, title: str, artist: str, art: Optional[tuple[bytes
     filename and an iTunes search. Only fills gaps: anything the file already
     carries is left alone. Best-effort; a tagging failure must not fail an
     upload that otherwise succeeded."""
-    ext = path.suffix.lower()
+    ext = _container_of(path)
     try:
         if ext in _MP4_EXTS:
             from mutagen.mp4 import MP4, MP4Cover
@@ -497,7 +510,7 @@ def _enrich_file(path: Path) -> None:
     remux (correctly) stripped — this puts proper MP4 tags back, from the
     "Artist - Title" filename plus iTunes cover art. Files that already have
     tags/art are untouched. Best-effort: any failure leaves the file as-is."""
-    ext = path.suffix.lower()
+    ext = _container_of(path)
     if ext == ".mp3":
         # MP3 uploads used to fall straight through here, so a phone-local file
         # with no cover of its own reached the server bare and every /art
