@@ -164,14 +164,16 @@ _ART_EXT_BY_MIME = {
 }
 
 
-def _art_cache_name(track_id: str) -> str:
+def _art_cache_name(track_id: str, size: int = 0) -> str:
     """A track id is a base64 path and can be longer than a filename may be, so
-    the cache is keyed by its digest rather than the id itself."""
-    return hashlib.sha1(track_id.encode()).hexdigest()
+    the cache is keyed by its digest rather than the id itself. [size] keeps the
+    downscaled copies beside the original instead of overwriting it."""
+    digest = hashlib.sha1(track_id.encode()).hexdigest()
+    return digest if size <= 0 else f"{digest}_{size}"
 
 
-def _art_cache_read(track_id: str) -> Optional[tuple[bytes, str]]:
-    name = _art_cache_name(track_id)
+def _art_cache_read(track_id: str, size: int = 0) -> Optional[tuple[bytes, str]]:
+    name = _art_cache_name(track_id, size)
     for mime, ext in _ART_EXT_BY_MIME.items():
         path = ART_CACHE_DIR / f"{name}{ext}"
         try:
@@ -184,15 +186,48 @@ def _art_cache_read(track_id: str) -> Optional[tuple[bytes, str]]:
     return None
 
 
-def _art_cache_write(track_id: str, data: bytes, mime: str) -> None:
+def _art_cache_write(track_id: str, data: bytes, mime: str, size: int = 0) -> None:
     if not data:
         return
     try:
         ART_CACHE_DIR.mkdir(parents=True, exist_ok=True)
         ext = _ART_EXT_BY_MIME.get(mime, ".jpg")
-        (ART_CACHE_DIR / f"{_art_cache_name(track_id)}{ext}").write_bytes(data)
+        (ART_CACHE_DIR / f"{_art_cache_name(track_id, size)}{ext}").write_bytes(data)
     except Exception:
         pass
+
+
+def _downscale(data: bytes, size: int) -> Optional[tuple[bytes, str]]:
+    """Cover art shrunk so its longest side is [size], as JPEG.
+
+    Done with ffmpeg, which the image already carries for the faststart remux,
+    rather than adding an imaging library for one call.
+
+    This exists because full-size covers are the reason a phone's widget was
+    showing the wrong picture. The art endpoint serves whatever the file holds —
+    around 120 KB for a typical embedded cover — while the widget draws it at
+    192 px and allows two seconds to fetch it. Over a flaky link that timed out
+    every single time, and the tile kept the previous song's cover instead.
+    """
+    if not _FFMPEG or size <= 0 or not data:
+        return None
+    try:
+        proc = subprocess.run(
+            [
+                _FFMPEG, "-v", "error", "-i", "pipe:0",
+                "-vf", f"scale={size}:{size}:force_original_aspect_ratio=decrease",
+                "-f", "mjpeg", "-q:v", "5", "pipe:1",
+            ],
+            input=data,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=15,
+        )
+        if proc.returncode == 0 and proc.stdout:
+            return proc.stdout, "image/jpeg"
+    except Exception:
+        pass
+    return None
 
 
 def _fetch_art(url: str) -> Optional[tuple[bytes, str]]:
@@ -833,7 +868,7 @@ def playlist_tracks(playlist_id: str, request: Request):
 
 
 @app.get("/art/{track_id}")
-def art(track_id: str):
+def art(track_id: str, size: int = 0):
     """Cover art for a track: embedded image if present, otherwise the online
     cover (iTunes) proxied through this server. We proxy rather than redirect
     because media players (Media3's DataSourceBitmapLoader) refuse the
@@ -847,23 +882,41 @@ def art(track_id: str):
             "Cache-Control": "public, max-age=86400",
         })
 
+    # A downscaled copy is its own cache entry, so the common case — a widget
+    # asking for the same small cover over and over — never re-encodes.
+    size = max(0, min(size, 1024))
+    if size:
+        small = _art_cache_read(track_id, size)
+        if small:
+            return served(*small)
+
+    def deliver(full: tuple[bytes, str]) -> Response:
+        if not size:
+            return served(*full)
+        shrunk = _downscale(full[0], size)
+        if shrunk is None:
+            # Better a slow big picture than none at all.
+            return served(*full)
+        _art_cache_write(track_id, shrunk[0], shrunk[1], size)
+        return served(*shrunk)
+
     # Cheapest first, and the only branch that costs nothing when the network
     # is down or slow. Everything below writes here on the way out.
     cached = _art_cache_read(track_id)
     if cached:
-        return served(*cached)
+        return deliver(cached)
 
     embedded = _embedded_art(path)
     if embedded:
         _art_cache_write(track_id, *embedded)
-        return served(*embedded)
+        return deliver(embedded)
 
     title, artist, _ = _read_tags(path)
     hit = _itunes_lookup(artist, title)
     fetched = _fetch_art(hit.get("artwork") if hit else "")
     if fetched:
         _art_cache_write(track_id, *fetched)
-        return served(*fetched)
+        return deliver(fetched)
     raise HTTPException(status_code=404, detail="No artwork")
 
 
