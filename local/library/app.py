@@ -342,6 +342,15 @@ def _embedded_art(path: Path) -> Optional[tuple[bytes, str]]:
 _online_cache: dict[str, Optional[dict]] = {}
 
 
+# Title fragments that mark a re-recording rather than the original, compared
+# against a lowercased alphanumeric-only title.
+_COVER_MARKERS = (
+    "originallyperformedby", "karaoke", "madefamousby", "inthestyleof",
+    "tributeto", "tributeversion", "coverversion", "instrumentalversion",
+    "backingtrack",
+)
+
+
 def _itunes_lookup(artist: str, title: str) -> Optional[dict]:
     if not ONLINE_ENRICH:
         return None
@@ -369,27 +378,44 @@ def _itunes_lookup(artist: str, title: str) -> Optional[dict]:
             want_artist = "" if artist == UNKNOWN_ARTIST else norm(
                 re.split(r",|&|;", artist)[0]
             )
-            def artist_ok(hit, t):
+            def title_ok(t):
+                return t and (t == want_title or want_title in t or t in want_title)
+
+            def is_cover(t):
+                # A karaoke or tribute version names the original artist in its
+                # own title, so an artist check alone lets it through and puts a
+                # karaoke sleeve on someone's song.
+                return any(m in t for m in _COVER_MARKERS)
+
+            def exact_artist(hit):
                 if not want_artist:
                     return True
                 a = norm(hit.get("artistName"))
-                if a and (want_artist in a or a in want_artist):
-                    return True
-                # Re-uploads credit the uploader and leave the real artist in
-                # the track name instead ("Freaked Out Fat Papi x ..." posted
-                # under another name). Still a guard: the artist has to appear
-                # somewhere in the hit, not merely be absent from it.
-                return want_artist in t
+                return bool(a) and (want_artist in a or a in want_artist)
 
+            # The artist field really is this artist, searched across every
+            # result before anything looser is tried.
             it = next(
                 (
                     hit for hit in items
-                    if (t := norm(hit.get("trackName"))) and (
-                        t == want_title or want_title in t or t in want_title
-                    ) and artist_ok(hit, t)
+                    if title_ok(t := norm(hit.get("trackName")))
+                    and not is_cover(t)
+                    and exact_artist(hit)
                 ),
                 None,
             )
+            if it is None and want_artist:
+                # Only then: a re-upload crediting the uploader, with the real
+                # artist left in the track name.
+                it = next(
+                    (
+                        hit for hit in items
+                        if title_ok(t := norm(hit.get("trackName")))
+                        and not is_cover(t)
+                        and want_artist in t
+                    ),
+                    None,
+                )
             if it:
                 art = it.get("artworkUrl100")
                 # iTunes serves 100px by default; ask for a big banner instead.
