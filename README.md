@@ -1,6 +1,6 @@
-# Neutrino Server
+# Spinet Server
 
-Your own **cloud music library** for the **Neutrino** app. A small self-hosted
+Your own **cloud music library** for the **Spinet** app. A small self-hosted
 server that stores your music and serves it back to the app — upload from the
 phone, browse folders as playlists, stream, and delete. One `docker compose up`.
 
@@ -106,16 +106,16 @@ Clone it straight from GitHub in your PuTTY session — no file-transfer tool ne
 ```bash
 sudo apt update && sudo apt install -y git
 cd ~
-git clone https://github.com/Kevcar98/Neutrino-Server-Docker.git neutrino-server
-cd neutrino-server
+git clone https://github.com/Kevcar98/Spinet-Server.git spinet-server
+cd spinet-server
 ```
 
-It's a public repo, so no login. To update later: `cd ~/neutrino-server && git pull && docker compose up -d --build`.
+It's a public repo, so no login. To update later: `cd ~/spinet-server && git pull && docker compose up -d --build`.
 
 ### 7. Configure it
 
 ```bash
-cd ~/neutrino-server
+cd ~/spinet-server
 
 cp .env.example .env
 nano .env                  # set DOMAIN to your real domain
@@ -140,7 +140,7 @@ curl "https://library.<your-domain>/playlists"   # your folders
 
 ### 9. Add it to the app
 
-In Neutrino: **Settings → My Server** → **Host:** `https://library.<your-domain>`
+In Spinet: **Settings → My Server** → **Host:** `https://library.<your-domain>`
 → **Save**. Your library, uploads, and playback now route through your own server.
 
 ---
@@ -227,11 +227,11 @@ docker --version && docker compose version
 ```bash
 sudo apt update && sudo apt install -y git
 cd ~
-git clone https://github.com/Kevcar98/Neutrino-Server-Docker.git neutrino-server
-cd neutrino-server
+git clone https://github.com/Kevcar98/Spinet-Server.git spinet-server
+cd spinet-server
 ```
 
-It's a public repo, so no login. To update later: `cd ~/neutrino-server && git pull && docker compose -f docker-compose.http.yml up -d --build`.
+It's a public repo, so no login. To update later: `cd ~/spinet-server && git pull && docker compose -f docker-compose.http.yml up -d --build`.
 
 ### 7. Start it
 
@@ -251,7 +251,7 @@ curl "http://localhost:8091/playlists"   # folders
 
 ### 8. Add it to the app
 
-In Neutrino: **Settings → My Server** → **Host:** `http://<your-reserved-ip>:8091`
+In Spinet: **Settings → My Server** → **Host:** `http://<your-reserved-ip>:8091`
 → **Save**. Your library, uploads, and playback now route through your own server.
 
 ---
@@ -262,7 +262,7 @@ When this repo gets new features (e.g. cross-device resume), pull the changes an
 rebuild the container. From your PuTTY session:
 
 ```bash
-cd ~/neutrino-server
+cd ~/spinet-server
 ```
 
 **Plain HTTP (IP only):**
@@ -297,7 +297,7 @@ curl "http://localhost:8091/health"      # plain HTTP
 
 ## Transfer history
 
-Every upload and delete is appended to `.neutrino_transfers.jsonl` in the music
+Every upload and delete is appended to `.spinet_transfers.jsonl` in the music
 folder — one JSON object per line, hidden from the audio scan, and kept in the
 same volume as your music so it survives rebuilds. Read it back:
 
@@ -323,7 +323,7 @@ it existing.
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 
-Neutrino Server is Free Software: you can use, study, share, and improve it at
+Spinet Server is Free Software: you can use, study, share, and improve it at
 will. Specifically you can redistribute and/or modify it under the terms of the
 [GNU General Public License](https://www.gnu.org/licenses/gpl-3.0.html) as
 published by the Free Software Foundation, either version 3 of the License, or

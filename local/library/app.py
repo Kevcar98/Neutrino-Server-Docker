@@ -1,4 +1,4 @@
-"""Self-hosted cloud music library for the Neutrino app. Serves your own files
+"""Self-hosted cloud music library for the Spinet app. Serves your own files
 in the shape the app's custom-source API understands (/search, /streams/{id},
 /playlists, /upload). Point Settings -> My Server at this box — fully your own
 content, nothing fetched from anywhere else.
@@ -155,7 +155,7 @@ def _read_tags(path: Path) -> tuple[str, str, Optional[float]]:
 # Lives beside the other hidden state files in the music dir, so it survives a
 # container restart through the same bind mount. Image files are not in
 # AUDIO_EXTS, so the scanner never sees them.
-ART_CACHE_DIR = MUSIC_DIR / ".neutrino_art"
+ART_CACHE_DIR = MUSIC_DIR / ".spinet_art"
 
 _ART_EXT_BY_MIME = {
     "image/jpeg": ".jpg",
@@ -615,7 +615,7 @@ _SAFE_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 # dir (ignored by the audio scan), JSON Lines rather than one JSON array: an
 # append is a single write, so a crash or a killed container can't truncate the
 # entries already on disk.
-TRANSFER_LOG = MUSIC_DIR / ".neutrino_transfers.jsonl"
+TRANSFER_LOG = MUSIC_DIR / ".spinet_transfers.jsonl"
 
 # Appends come from request handlers, which FastAPI may run on several threads.
 _transfer_lock = threading.Lock()
@@ -1058,7 +1058,7 @@ def delete_file(track_id: str):
 # to the server), the position, and a millisecond timestamp. The client with the
 # NEWER timestamp wins, so the last device to pause/close sets the resume point.
 # Stored as a hidden JSON file in the music dir (ignored by the audio scan).
-NOWPLAYING_FILE = MUSIC_DIR / ".neutrino_nowplaying.json"
+NOWPLAYING_FILE = MUSIC_DIR / ".spinet_nowplaying.json"
 
 
 class NowPlaying(BaseModel):
@@ -1138,7 +1138,7 @@ def put_nowplaying(state: NowPlaying):
 # A shared backup of the user's playlists + liked songs, so another device can
 # fetch them. Track/playlist JSON is the client's own shape — opaque here; the
 # receiving client merges it into its local library (never wholesale-replaces).
-PLAYLIST_SYNC_FILE = MUSIC_DIR / ".neutrino_playlists.json"
+PLAYLIST_SYNC_FILE = MUSIC_DIR / ".spinet_playlists.json"
 
 
 class PlaylistSync(BaseModel):
@@ -1182,3 +1182,34 @@ def put_playlist_sync(state: PlaylistSync):
 @app.get("/health")
 def health():
     return {"status": "ok", "tracks": len(_tracks)}
+
+
+# ---- pre-rename state files ------------------------------------------------
+# This app was called Neutrino before it was called Spinet. The hidden files in
+# the music dir are not caches — they hold the playlist and liked-songs backup,
+# the cross-device resume point, and the transfer history. Renaming the
+# constants alone would orphan all of that on a server that has been running,
+# so anything still sitting under an old name is moved across once, on startup.
+_LEGACY_STATE = [
+    (MUSIC_DIR / ".neutrino_art", ART_CACHE_DIR),
+    (MUSIC_DIR / ".neutrino_transfers.jsonl", TRANSFER_LOG),
+    (MUSIC_DIR / ".neutrino_nowplaying.json", NOWPLAYING_FILE),
+    (MUSIC_DIR / ".neutrino_playlists.json", PLAYLIST_SYNC_FILE),
+]
+
+
+@app.on_event("startup")
+def _migrate_legacy_state() -> None:
+    """Move pre-rename state to its current name.
+
+    Never raises: failing to migrate must not stop the server coming up, it
+    only means the old file stays where it is and can be moved by hand.
+    """
+    for old, new in _LEGACY_STATE:
+        if not old.exists() or new.exists():
+            continue
+        try:
+            old.rename(new)
+            print(f"[spinet] migrated {old.name} -> {new.name}", flush=True)
+        except Exception as exc:
+            print(f"[spinet] could not migrate {old.name}: {exc}", flush=True)
