@@ -369,18 +369,24 @@ def _itunes_lookup(artist: str, title: str) -> Optional[dict]:
             want_artist = "" if artist == UNKNOWN_ARTIST else norm(
                 re.split(r",|&|;", artist)[0]
             )
+            def artist_ok(hit, t):
+                if not want_artist:
+                    return True
+                a = norm(hit.get("artistName"))
+                if a and (want_artist in a or a in want_artist):
+                    return True
+                # Re-uploads credit the uploader and leave the real artist in
+                # the track name instead ("Freaked Out Fat Papi x ..." posted
+                # under another name). Still a guard: the artist has to appear
+                # somewhere in the hit, not merely be absent from it.
+                return want_artist in t
+
             it = next(
                 (
                     hit for hit in items
                     if (t := norm(hit.get("trackName"))) and (
                         t == want_title or want_title in t or t in want_title
-                    ) and (
-                        not want_artist or (
-                            (a := norm(hit.get("artistName"))) and (
-                                want_artist in a or a in want_artist
-                            )
-                        )
-                    )
+                    ) and artist_ok(hit, t)
                 ),
                 None,
             )
