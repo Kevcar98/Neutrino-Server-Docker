@@ -351,6 +351,44 @@ _COVER_MARKERS = (
 )
 
 
+_artist_id_cache: dict[str, Optional[int]] = {}
+
+
+def _artist_catalog(artist: str) -> list[dict]:
+    """Every song iTunes lists for this artist, or an empty list.
+
+    Two calls - name to artist id, then id to songs. The id is cached per artist
+    name, and the pair only runs once a plain search has already failed, so the
+    common path is untouched.
+    """
+    name = re.split(r",|&|;", artist)[0].strip()
+    if not name:
+        return []
+    try:
+        if name not in _artist_id_cache:
+            r = httpx.get(
+                ITUNES_SEARCH,
+                params={"term": name, "entity": "musicArtist", "limit": 1},
+                timeout=6.0,
+            )
+            hits = (r.json().get("results") or []) if r.status_code == 200 else []
+            _artist_id_cache[name] = hits[0].get("artistId") if hits else None
+        artist_id = _artist_id_cache[name]
+        if not artist_id:
+            return []
+        r = httpx.get(
+            "https://itunes.apple.com/lookup",
+            params={"id": artist_id, "entity": "song", "limit": 200},
+            timeout=8.0,
+        )
+        if r.status_code != 200:
+            return []
+        return [x for x in (r.json().get("results") or [])
+                if x.get("wrapperType") == "track"]
+    except Exception:
+        return []
+
+
 def _itunes_lookup(artist: str, title: str) -> Optional[dict]:
     if not ONLINE_ENRICH:
         return None
@@ -413,6 +451,19 @@ def _itunes_lookup(artist: str, title: str) -> Optional[dict]:
                         if title_ok(t := norm(hit.get("trackName")))
                         and not is_cover(t)
                         and want_artist in t
+                    ),
+                    None,
+                )
+            if it is None and artist != UNKNOWN_ARTIST:
+                # Last resort: the artist's own catalogue. Searching
+                # "artist title" ranks by text relevance, and a song with many
+                # covers can be pushed out of the results entirely while every
+                # karaoke of it remains. Listing the artist's songs finds it.
+                it = next(
+                    (
+                        hit for hit in _artist_catalog(artist)
+                        if title_ok(t := norm(hit.get("trackName")))
+                        and not is_cover(t)
                     ),
                     None,
                 )
