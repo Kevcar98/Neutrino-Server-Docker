@@ -7,6 +7,15 @@ phone, browse folders as playlists, stream, and delete. One `docker compose up`.
 It only ever serves **your own files**. No search engines, no extraction, nothing
 fetched from anywhere — just your library on a box you control.
 
+| | |
+|---|---|
+| ☁️ **This repo** | The server |
+| 💻 **Desktop app** | [Spinet-Desktop](https://github.com/Kevcar98/Spinet-Desktop) — Windows, macOS, Linux |
+| 📱 **Android app** | [Spinet-Mobile](https://github.com/Kevcar98/Spinet-Mobile) |
+
+The apps work without a server; this is what makes a library follow you between
+them — playlists, likes and play counts included.
+
 Takes ~20–30 minutes on a free Oracle Cloud server, no ongoing cost.
 
 ## Quick choice: HTTPS (with domain) or plain HTTP (IP only)?
