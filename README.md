@@ -22,7 +22,7 @@ Takes ~20–30 minutes on a free Oracle Cloud server, no ongoing cost.
 
 | Setup | Domain required? | HTTPS? |
 |-------|------------------|--------|
-| **HTTPS** (recommended) | Yes — free ones work (DuckDNS, Cloudflare) | Yes, automatic |
+| **HTTPS** (recommended) | A hostname, which [Duck DNS](https://www.duckdns.org) gives away free | Yes, automatic |
 | **Plain HTTP** (IP only) | No — just your server IP | No |
 
 - **Have a domain or want a free one?** Follow **[HTTPS setup](#https-setup-with-domain)** (steps 1–9).
@@ -98,15 +98,31 @@ docker --version && docker compose version
 
 ### 5. Point your domain at it
 
-If you don't have a domain, get any cheap one (or a free one from Duck DNS /
-Cloudflare). Add one A/AAAA record → your instance's public IP:
+You do **not** need to buy one. Either works:
 
-```
-library.<your-domain>
+**Free — Duck DNS** (two minutes, no card)
+
+1. Go to <https://www.duckdns.org> and sign in with Google/GitHub/Reddit.
+2. Type a name — say `spinet-kev` — and press **add domain**. You now own
+   `spinet-kev.duckdns.org`.
+3. Put your instance's public IP in the **current ip** box and press **update ip**.
+
+That name is the whole hostname: there is no subdomain to add.
+
+**A domain of your own**
+
+Add one A (or AAAA) record pointing at your instance's public IP, for example
+`library.example.com`.
+
+Either way, check it resolves before going further:
+
+```bash
+nslookup spinet-kev.duckdns.org
 ```
 
-DNS has to resolve **before** you start the stack, or the free HTTPS certificate
-step will fail.
+DNS has to resolve **before** you start the stack: the certificate is issued by
+a server that visits that name, and it cannot do that if the name points
+nowhere.
 
 ### 6. Get this repo onto the server (git)
 
@@ -127,7 +143,14 @@ It's a public repo, so no login. To update later: `cd ~/spinet-server && git pul
 cd ~/spinet-server
 
 cp .env.example .env
-nano .env                  # set DOMAIN to your real domain
+nano .env                  # DOMAIN = the exact hostname from step 5
+```
+
+`DOMAIN` is the whole host, not just the registered part:
+
+```
+DOMAIN=spinet-kev.duckdns.org      # free Duck DNS name
+DOMAIN=library.example.com         # your own domain
 ```
 
 *(Optional)* Put your own music in `local/library/music/` now, so your library
@@ -143,13 +166,16 @@ docker compose logs -f caddy library
 Give it a minute for the HTTPS certificate, then check:
 
 ```bash
-curl "https://library.<your-domain>/health"      # {"status":"ok",...}
-curl "https://library.<your-domain>/playlists"   # your folders
+curl "https://<your-domain>/health"      # {"status":"ok",...}
+curl "https://<your-domain>/playlists"   # your folders
 ```
+
+A certificate error here almost always means DNS was not resolving yet when the
+stack started. Fix the record, then `docker compose restart caddy`.
 
 ### 9. Add it to the app
 
-In Spinet: **Settings → My Server** → **Host:** `https://library.<your-domain>`
+In Spinet: **Settings → My Server** → **Host:** `https://<your-domain>`
 → **Save**. Your library, uploads, and playback now route through your own server.
 
 ---
@@ -292,7 +318,7 @@ are untouched — only the app code updates. Confirm it came back up:
 
 ```bash
 curl "http://localhost:8091/health"      # plain HTTP
-# curl "https://library.<your-domain>/health"   # HTTPS
+# curl "https://<your-domain>/health"           # HTTPS
 ```
 
 ## Adding music

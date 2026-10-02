@@ -1,6 +1,6 @@
-# Automatic HTTPS via Let's Encrypt. DOMAIN comes from .env.
-# The library server is the whole backend — one subdomain.
-
-library.{$DOMAIN} {
+# Automatic HTTPS via Let's Encrypt. DOMAIN comes from .env and is the exact
+# host this serves — "library.example.com" with a domain of your own, or
+# "yourname.duckdns.org" with a free one, which has no subdomain to give.
+{$DOMAIN} {
 	reverse_proxy library:8091
 }
